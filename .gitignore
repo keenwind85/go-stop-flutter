@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node modules (for Firebase functions, etc.)
+node_modules/
+package-lock.json
