@@ -1,0 +1,49 @@
+{
+  "rules": {
+    "users": {
+      ".indexOn": ["wallet/coin", "wallet/total_earned", "wallet/gwangkki_score"],
+      ".read": "auth != null",
+
+      "$uid": {
+        ".write": "auth != null && auth.uid == $uid",
+
+        "wallet": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['coin']) && newData.child('coin').isNumber() && newData.child('coin').val() >= 0 && (!newData.hasChild('gwangkki_score') || (newData.child('gwangkki_score').isNumber() && newData.child('gwangkki_score').val() >= 0 && newData.child('gwangkki_score').val() <= 100))"
+        },
+
+        "daily_actions": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+
+        "profile": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid == $uid"
+        }
+      }
+    },
+
+    "rooms": {
+      ".indexOn": ["state", "createdAt"],
+      ".read": "auth != null",
+      ".write": "auth != null",
+
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+
+        "rematch_vote": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        },
+
+        "settlement": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    }
+  }
+}

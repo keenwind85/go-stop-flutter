@@ -1,0 +1,597 @@
+<style>
+  /* --- 1. 기본 데스크탑 스타일 --- */
+  .premium-floating {
+    position: fixed;
+    right: 5%; /* PC 위치 */
+    top: 120px;
+    width: 320px; /* 너비 */
+    z-index: 9000;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: none; /* JS 로드 후 표시 */
+    transition: all 0.3s ease;
+  }
+
+  .premium-floating__inner {
+    background-color: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    padding: 20px 18px 16px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 헤더 */
+  .premium-floating__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .premium-floating__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  /* X 닫기 버튼 (모바일용) */
+  .pf-close-widget {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    display: none;
+  }
+
+  /* 폼 영역 */
+  .premium-floating__form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-field label {
+    font-size: 12px;
+    color: #4b5563;
+    font-weight: 600;
+  }
+  .form-field input {
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    padding: 0 10px;
+    font-size: 14px;
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .form-field input:focus {
+    outline: none;
+    border-color: #eab308;
+    box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.5);
+  }
+
+  /* --- 하단 액션 버튼 그룹 --- */
+  .pf-btn-group-wrapper {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .btn-icon-only {
+    display: none; /* PC 숨김 */
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    border: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .btn-icon-only svg { width: 20px; height: 20px; fill: currentColor; }
+  .btn-phone { background-color: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; }
+  .btn-chat { background-color: #1f2937; color: #ffffff; border: 1px solid #1f2937; }
+
+  /* 메인 전송 버튼 */
+  .btn-primary {
+    flex: 1;
+    border: none;
+    border-radius: 999px;
+    height: 48px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    background: linear-gradient(135deg, #f59e0b, #eab308);
+    color: #111827;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-primary:disabled { background: #d1d5db; color: #9ca3af; cursor: not-allowed; }
+
+  /* --- 약관 동의 섹션 (버튼 하단) --- */
+  .pf-terms-section {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 2px;
+  }
+  .pf-term-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center; /* 수직 중앙 정렬 */
+    font-size: 12px;
+    color: #374151;
+    gap: 8px; /* 텍스트와 버튼 사이 간격 */
+  }
+  .pf-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    flex: 1; /* 남은 공간 차지 */
+  }
+  .pf-checkbox-label input {
+    accent-color: #eab308;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .pf-view-detail {
+    background: none;
+    border: none;
+    font-size: 11px;
+    color: #6b7280;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    white-space: nowrap; /* 절대 줄바꿈 안 함 */
+    flex-shrink: 0;      /* 공간 부족해도 줄어들지 않음 */
+  }
+
+  /* 데스크탑용 하단 리스트 */
+  .premium-floating__actions {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid #f3f4f6;
+    padding-top: 16px;
+  }
+  .premium-floating__actions-title { font-size: 12px; color: #6b7280; margin: 0 0 4px; }
+  .action-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; border-radius: 8px; border: 1px solid #e5e7eb; padding: 10px 12px; font-size: 13px; font-weight: 500; background-color: #fff; color: #374151; cursor: pointer; text-decoration: none; box-sizing: border-box; }
+  .action-btn:hover { background-color: #f9fafb; }
+  .action-btn--dark { background-color: #1f2937; color: #fff; border-color: #1f2937; }
+  .action-btn__label-sub { color: #6b7280; font-size: 12px; }
+
+  /* --- 2. 모바일 반응형 스타일 --- */
+  @media (max-width: 768px) {
+    .premium-floating {
+      right: 0 !important; left: 0; bottom: 0; top: auto;
+      width: 100%;
+      padding: 10px 12px 12px;
+      box-sizing: border-box;
+      background: transparent;
+    }
+    
+    .premium-floating__inner {
+      border-radius: 20px 20px 0 0;
+      padding: 20px 20px 20px;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+      background-color: #ffffff;
+    }
+
+    .pf-close-widget { display: block; }
+    .premium-floating__actions { display: none !important; }
+    .btn-icon-only { display: flex; }
+    .btn-primary { border-radius: 12px; }
+
+    /* 접힌 상태 */
+    .premium-floating.is-collapsed { padding: 0; }
+    .premium-floating.is-collapsed .premium-floating__inner {
+      padding: 10px 12px;
+      border-radius: 0;
+      border-top: 1px solid #e5e7eb;
+    }
+    .premium-floating.is-collapsed .premium-floating__header,
+    .premium-floating.is-collapsed .form-field,
+    .premium-floating.is-collapsed .pf-terms-section { display: none !important; } 
+    .premium-floating.is-collapsed .premium-floating__form { gap: 0; }
+    .premium-floating.is-collapsed .pf-btn-group-wrapper { margin-top: 0; }
+  }
+
+  /* 약관 상세 팝업 (모달) */
+  .pf-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.5); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 20px; }
+  .pf-modal { background: #fff; width: 100%; max-width: 500px; max-height: 85vh; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+  .pf-modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+  .pf-modal-title { font-size: 16px; font-weight: 700; margin: 0; color: #111827; }
+  .pf-modal-close { background:none; border:none; font-size: 24px; cursor:pointer; color:#9ca3af; }
+  .pf-modal-body { padding: 20px; overflow-y: auto; background-color: #fff; flex: 1; }
+  .pf-term-text-block { display: none; font-size: 13px; line-height: 1.6; color: #374151; white-space: pre-wrap; }
+  .pf-term-text-block.is-active { display: block; }
+</style>
+
+<div class="premium-floating" id="premiumFloating">
+  <div class="premium-floating__inner">
+    <header class="premium-floating__header">
+      <h2 class="premium-floating__title">간편 상담 신청</h2>
+      <button type="button" class="pf-close-widget" id="btnCollapseWidget" aria-label="접기">&times;</button>
+    </header>
+
+    <form class="premium-floating__form" id="premiumForm" onsubmit="return false;">
+      <div class="form-field">
+        <label>이름</label>
+        <input id="pf-name" type="text" placeholder="홍길동" />
+      </div>
+      <div class="form-field">
+        <label>휴대폰번호</label>
+        <input id="pf-phone" type="tel" maxlength="11" placeholder="-없이 입력" />
+      </div>
+
+      <div class="pf-btn-group-wrapper">
+        <a href="tel:1533-1803" class="btn-icon-only btn-phone" aria-label="전화 상담">
+          <svg viewBox="0 0 24 24"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.49-5.15-3.8-6.62-6.62l1.97-1.57c.23-.23.31-.56.25-.87-.36-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3.46 3 3.9 3 4.46c0 9.27 7.55 16.82 16.82 16.82.55 0 .99-.45.99-.99v-3.91c0-.55-.45-1-1-1z"/></svg>
+        </a>
+        <button type="button" class="btn-icon-only btn-chat" id="pf-mobile-chat-btn" aria-label="채팅 상담">
+          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        </button>
+        <button type="button" class="btn-primary" id="btnCheckPremium">
+          간편 상담 신청
+        </button>
+      </div>
+
+      <div class="pf-terms-section">
+        <div class="pf-term-row">
+          <label class="pf-checkbox-label">
+            <input type="checkbox" class="pf-agree-chk" id="agree1" checked>
+            [필수] 개인정보 수집 및 이용 동의
+          </label>
+          <button type="button" class="pf-view-detail" data-target="termText1">자세히보기</button>
+        </div>
+        <div class="pf-term-row">
+          <label class="pf-checkbox-label">
+            <input type="checkbox" class="pf-agree-chk" id="agree2" checked>
+            [필수] 개인정보 제3자 제공 동의
+          </label>
+          <button type="button" class="pf-view-detail" data-target="termText2">자세히보기</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="premium-floating__actions">
+      <p class="premium-floating__actions-title">추가 상담 / 서비스</p>
+      <a href="https://ssm-nursing-agent-web.vercel.app/" class="action-btn" target="_blank"><span>① 순시미네 요양비서</span></a>
+      <a href="tel:1533-1803" class="action-btn"><span>② 전화 상담 <span class="action-btn__label-sub">(1533-1803)</span></span></a>
+      <button type="button" class="action-btn action-btn--dark" id="pf-channel-talk-btn"><span>③ 채널톡 상담</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="pf-modal-overlay" id="termModal">
+  <div class="pf-modal">
+    <div class="pf-modal-header">
+      <h3 class="pf-modal-title" id="termModalTitle">약관 상세</h3>
+      <button type="button" class="pf-modal-close" id="closeTermModal">&times;</button>
+    </div>
+    <div class="pf-modal-body">
+      
+      <div id="termText1" class="pf-term-text-block">
+안앤락(이하 ‘회사’라 한다)은 개인정보 보호법 제30조에 따라 정보 주체의 개인정보를 보호하고 이와 관련한 고충을 신속하고 원활하게 처리할 수 있도록 하기 위하여 다음과 같이 개인정보 처리지침을 수립, 공개합니다.
+
+제1조 (개인정보의 처리목적)
+회사는 다음의 목적을 위하여 개인정보를 처리합니다. 처리하고 있는 개인정보는 다음의 목적 이외의 용도로는 이용되지 않으며, 이용 목적이 변경되는 경우에는 개인정보보호법 제18조에 따라 별도의 동의를 받는 등 필요한 조치를 이행할 예정입니다.
+
+1. 홈페이지 회원 가입 및 관리
+회원 가입 의사 확인, 회원제 서비스 제공에 따른 본인 식별·인증, 회원자격 유지·관리, 제한적 본인확인제 시행에 따른 본인확인, 서비스 부정 이용 방지, 만 14세 미만 아동의 개인정보처리 시 법정대리인의 동의 여부 확인, 각종 고지·통지, 고충 처리 등을 목적으로 개인정보를 처리합니다.
+
+2. 재화 또는 서비스 제공
+물품 배송, 서비스 제공, 계약서 및 청구서 발송, 콘텐츠 제공, 맞춤서비스 제공, 본인인증, 연령인증, 요금 결제 및 정산, 채권추심 등을 목적으로 개인정보를 처리합니다.
+
+3. 고충 처리
+민원인의 신원 확인, 민원사항 확인, 사실조사를 위한 연락·통지, 처리 결과 통보 등의 목적으로 개인정보를 처리합니다.
+
+제2조 (개인정보의 처리 및 보유기간)
+① 회사는 법령에 따른 개인정보 보유, 이용 기간 또는 정보주체로부터 개인정보를 수집 시에 동의 받은 개인정보 보유, 이용 기간 내에서 개인정보를 처리, 보유합니다.
+② 각각의 개인정보 처리 및 보유 기간은 다음과 같습니다.
+
+1. 홈페이지 회원 가입 및 관리 : 사업자/단체 홈페이지 탈퇴 시까지
+다만, 다음의 사유에 해당하는 경우에는 해당 사유 종료 시까지
+1) 관계 법령 위반에 따른 수사, 조사 등이 진행 중인 경우에는 해당 수사, 조사 종료 시까지
+2) 홈페이지 이용에 따른 채권 및 채무관계 잔존 시에는 해당 채권, 채무 관계 정산 시까지
+
+제3조 (개인정보의 제3자 제공)
+① 회사는 정보주체의 개인정보를 제1조(개인정보의 처리목적)에서 명시한 범위 내에서만 처리하며, 정보주체의 동의, 법률의 특별한 규정 등 개인정보 보호법 제17조 및 제 18조에 해당하는 경우에만 개인정보를 제3자에게 제공하고 그 외에는 정보주체의 개인정보를 제3자에게 제공하지 않습니다.
+② 회사는 원활한 서비스 제공을 위해 다음의 경우 개인정보보호법 제17조 제1항 제1호에 따라 정보주체의 동의를 얻어 필요 최소한의 범위로만 개인정보를 제3자에게 제공할 수 있습니다.
+- 개인정보를 제공받는 자 : <주식회사 순시미>, <주식회사 케어온>, <제휴·가맹센터(방문요양센터)>
+- 제공받는 자의 개인정보 이용목적 : <고객 상담 및 상담 유형 분석>
+- 제공하는 개인정보 항목 : <상담자(보호자) : 성명, 연락처, 가족관계 / 상담자(요양보호사) : 성명, 생년월일, 연락처, 주소, 국적 / 수급자 : 성명, 생년월일, 연락처, 주소, 가족관계, 장기요양 인정정보(등급, 본인부담률), 국적>
+- 제공받는 자의 보유, 이용기간 : <상담일로부터 5년>
+
+제4조(개인정보처리의 위탁)
+① 회사는 원활한 개인정보 업무처리를 위하여 다음과 같이 개인정보 처리업무를 위탁하고 있습니다.
+- 위탁업무 내용
+- 위탁받는 자 (수탁자) : <(주)아임웹>
+- 위탁하는 업무의 내용 : 쇼핑몰 호스팅 서비스의 시스템 제공, 모바일 앱 서비스, 마케팅 서비스 및 부가, 제휴서비스 제공 및 알림톡, 친구톡, 문자메시지 발송대행 서비스 등
+- 위탁받는 자 (수탁자) : <주식회사 안앤락>, <주식회사 순시미>, <주식회사 케어온>, <제휴·가맹센터(방문요양센터)>
+- 위탁하는 업무의 내용 : 고객상담 업무
+- 위탁받는 자 (수탁자) : <주식회사 안앤락>, <주식회사 순시미>, <주식회사 케어온>, <제휴·가맹센터(방문요양센터)>
+- 위탁하는 업무의 내용 : 본인확인 업무
+- **재위탁업무 내용**
+- **재위탁받는 자(수탁자) : <(주)아임웹> → <인포빕(유)>**
+- **위탁하는 업무의 내용 : 문자메시지 발송, 카카오톡 알림톡(정보성 메시지) 발송 업무**
+- **재위탁받는 자(수탁자) : <(주)아임웹> → <(주)루나소프트>**
+- **위탁하는 업무의 내용 : 문자메시지 발송, 카카오톡 알림톡(정보성 메시지) 및 친구톡 발송 업무**
+② 회사는 위탁계약 체결 시 개인정보 보호법 제25조에 따라 위탁업무 수행목적 외 개인정보 처리금지, 기술적·관리적 보호조치, 재위탁 제한, 수탁자에 대한 관리·감독, 손해배상 등 책임에 관한 사항을 계약서 등 문서에 명시하고, 수탁자가 개인정보를 안전하게 처리하는지를 감독하고 있습니다.
+③ 위탁업무의 내용이나 수탁자가 변경될 경우에는 지체없이 본 개인정보 처리방침을 통하여 공개하도록 하겠습니다.
+
+제5조(정보주체 및 법정대리인의 권리와 그 행사 방법)
+① 정보주체는 회사에 대해 언제든지 다음 각 호의 개인정보 보호 관련 권리를 행사할 수 있습니다.
+1. 개인정보 열람 요구
+2. 오류 등이 있을 경우 정정 요구
+3. 삭제요구
+4. 처리정지 요구
+② 제1항에 따른 권리 행사는 회사에 대해 서면, 전화, 전자우편, 모사전송(FAX) 등을 통하여 하실 수 있으며 회사는 이에 대해 지체없이 조치하겠습니다.
+③ 정보주체가 개인정보의 오류 등에 대한 정정 또는 삭제를 요구한 경우에는 회사는 정정 또는 삭제를 완료할 때까지 당해 개인정보를 이용하거나 제공하지 않습니다.
+④ 제1항에 따른 권리 행사는 정보주체의 법정대리인이나 위임을 받은 자 등 대리인을 통하여 하실 수 있습니다. 이 경우 개인정보 보호법 시행규칙 별지 제11호 서식에 따른 위임장을 제출하셔야 합니다.
+⑤ 정보주체는 개인정보 보호법 등 관계 법령을 위반하여 회사가 처리하고 있는 정보주체 본인이나 타인의 개인정보 및 사생활을 침해하여서는 아니 됩니다.
+
+제6조(처리하는 개인정보 항목)
+회사는 다음의 개인정보 항목을 처리하고 있습니다.
+1. 홈페이지 회원 가입 및 관리
+필수항목 : <상담자(보호자) : 성명, 연락처, 가족관계 / 상담자(요양보호사) : 성명, 생년월일, 연락처, 주소, 국적 / 수급자 : 성명, 생년월일, 연락처, 주소, 가족관계, 장기요양 인정정보(등급, 본인부담률), 국적>
+선택항목 : <관심 서비스>
+2. 재화 또는 서비스 제공
+필수항목 : <상담자(보호자) : 성명, 연락처, 가족관계 / 상담자(요양보호사) : 성명, 생년월일, 연락처, 주소, 국적 / 수급자 : 성명, 생년월일, 연락처, 주소, 가족관계, 장기요양 인정정보(등급, 본인부담률), 국적>
+선택항목 : <관심 서비스>
+
+제7조(개인정보의 파기)
+① 회사는 개인정보 보유 기간의 경과, 처리목적 달성 등 개인정보가 불필요하게 되었을 때에는 지체없이 해당 개인정보를 파기합니다.
+② 정보주체로부터 동의받은 개인정보 보유 기간이 경과하거나 처리목적이 달성되었음에도 불구하고 다른 법령에 따라 개인정보를 계속 보존하여야 하는 경우에는, 해당 개인정보를 별도의 데이터베이스(DB)로 옮기거나 보관장소를 달리하여 보존합니다.
+③ 개인정보 파기의 절차 및 방법은 다음과 같습니다.
+1. 파기 절차
+회사는 파기 사유가 발생한 개인정보를 선정하고, 회사의 개인정보 보호책임자의 승인을 받아 개인정보를 파기합니다.
+2. 파기 방법
+회사는 전자적 파일 형태로 기록·저장된 개인정보는 기록을 재생할 수 없도록 파기하며, 종이 문서에 기록·저장된 개인정보는 분쇄기로 분쇄하거나 소각하여 파기합니다.
+
+제8조(개인정보의 안전성 확보조치)
+회사는 개인정보의 안전성 확보를 위해 다음과 같은 조치를 하고 있습니다.
+1. 관리적 조치 : 내부관리계획 수립 및 시행, 정기적 직원 교육 등
+2. 기술적 조치 : 개인정보처리시스템 등의 접근 권한 관리, 접근통제시스템 설치, 고유 식별정보 등의 암호화, 보안프로그램 설치
+3. 물리적 조치 : 전산실, 자료보관실 등의 접근통제
+
+제9조(개인정보 자동 수집 장치의 설치∙운영 및 거부에 관한 사항)
+① 회사는 이용자에게 개별적인 맞춤 서비스를 제공하기 위해 이용정보를 저장하고 수시로 불러오는 ‘쿠키(cookie)’를 사용합니다.
+② 쿠키는 웹사이트를 운영하는데 이용되는 서버(http)가 이용자의 컴퓨터 브라우저에 보내는 소량의 정보이며 이용자들의 PC 또는 모바일에 저장됩니다.
+③ 정보주체는 웹 브라우저 옵션 설정을 통해 쿠키 허용, 차단 등의 설정을 할 수 있습니다. 다만, 쿠키 저장을 거부할 경우 맞춤형 서비스 이용에 어려움이 발생할 수 있습니다.
+▶ 웹 브라우저에서 쿠키 허용/차단
+- 크롬(Chrome) : 웹 브라우저 설정 > 개인정보 보호 및 보안 > 인터넷 사용기록 삭제
+- 엣지(Edge) : 웹 브라우저 설정 > 쿠키 및 사이트 권한 > 쿠키 및 사이트 데이터 관리 및 삭제
+▶ 모바일 브라우저에서 쿠키 허용/차단
+- 크롬(Chrome) : 모바일 브라우저 설정 > 개인정보 보호 및 보안 > 인터넷 사용기록 삭제
+- 사파리(Safari) : 모바일 기기 설정 > 사파리(Safari) > 고급 > 모든 쿠키 차단
+- 삼성 인터넷 : 모바일 브라우저 설정 > 인터넷 사용 기록 > 인터넷 사용 기록 삭제
+④ 회사는 서비스 이용과정에서 사용자가 방문한 각 서비스와 웹 사이트들에 대한 방문 및 이용형태, 인기 검색어, 보안접속 여부 등을 파악하여 이용자에게 최적화된 정보 제공을 위해 수집·이용하고 있습니다.
+
+제10조(개인정보 보호책임자)
+① 회사는 개인정보 처리에 관한 업무를 총괄해서 책임지고, 개인정보 처리와 관련한 정보주체의 불만 처리 및 피해구제 등을 위하여 아래와 같이 개인정보 보호책임자를 지정하고 있습니다.
+▶ 개인정보 보호책임자
+성명 : 정보영
+직책 : 본부장
+연락처 : 02-6671-1101, byjung@anl.kr, 02-6671-0100
+※ 개인정보 보호 담당부서로 연결됩니다.
+▶ 개인정보 보호 담당부서
+부서명 : 경영지원본부
+연락처 : 02-6671-1101, byjung@anl.kr, 02-6671-0100
+② 정보주체께서는 회사의 서비스(또는 사업)을 이용하시면서 발생한 모든 개인정보 보호 관련 문의, 불만 처리, 피해구제 등에 관한 사항을 개인정보 보호책임자 및 담당부서로 문의하실 수 있습니다. 회사는 정보주체의 문의에 대해 지체없이 답변 및 처리해드릴 것입니다.
+
+제11조(개인정보 열람청구)
+정보주체는 개인정보 보호법 제35조에 따른 개인정보의 열람 청구를 아래의 부서에 할 수 있습니다. 회사는 정보주체의 개인정보 열람 청구가 신속하게 처리되도록 노력하겠습니다.
+▶ 개인정보 열람청구 접수·처리 부서
+부서명 : 경영지원본부
+연락처 : 02-6671-1101, byjung@anl.kr, 02-6671-0100
+
+제12조(권익침해 구제 방법)
+정보주체는 아래의 기관에 대해 개인정보 침해에 대한 피해구제, 상담 등을 문의하실 수 있습니다.
+1. 개인정보 분쟁조정위원회 : (국번없이) 1833-6972 (www.kopico.go.kr)
+2. 개인정보침해신고센터 : (국번없이) 118 (privacy.kisa.or.kr)
+3. 대검찰청 : (국번없이) 1301 (www.spo.go.kr)
+4. 경찰청 : (국번없이) 182 (ecrm.police.go.kr/minwon/main)
+
+제13조(개인정보 처리방침 시행 및 변경)
+이 개인정보 처리방침은 2025. 07. 01. 부터 적용됩니다.
+      </div>
+      
+      <div id="termText2" class="pf-term-text-block">
+다음과 같이 개인정보를 제3자에게 제공하고 있습니다.
+
+1. 개인정보를 제공받는 자 : <주식회사 순시미>, <주식회사 케어온>, <제휴·가맹센터(방문요양센터)>
+2. 제공받는 자의 개인정보 이용목적 : 고객 상담 및 상담 유형 분석
+3. 제공하는 개인정보 항목 : 상담자(보호자) : 성명, 연락처, 가족관계 / 상담자(요양보호사) : 성명, 생년월일, 연락처, 주소, 국적 / 수급자 : 성명, 생년월일, 연락처, 주소, 가족관계, 장기요양 인정정보(등급, 본인부담률), 국적
+4. 제공받는 자의 보유 및 이용기간 : 상담일로부터 5년
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  
+  // 🔴 중요: 향후 구글시트에도 입력 시 사용가능
+  var GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx.../exec";
+
+  try {
+    /* 1. 채널톡 로드 */
+    var w = window;
+    var ch = function() { ch.c(arguments); };
+    ch.q = []; ch.c = function(args) { ch.q.push(args); };
+    if (!w.ChannelIO) w.ChannelIO = ch;
+
+    function loadChannelIO() {
+      if (w.ChannelIOInitialized) return;
+      w.ChannelIOInitialized = true;
+      var s = document.createElement('script');
+      s.type = 'text/javascript'; s.async = true;
+      s.src = 'https://cdn.channel.io/plugin/ch-plugin-web.js';
+      var x = document.getElementsByTagName('script')[0];
+      if(x && x.parentNode) x.parentNode.insertBefore(s, x);
+      else document.head.appendChild(s);
+    }
+
+    /* 2. 위젯 로직 */
+    function initWidget() {
+      try {
+        var widget = document.getElementById("premiumFloating");
+        if(widget) widget.style.display = "block";
+
+        var nameInput = document.getElementById("pf-name");
+        var phoneInput = document.getElementById("pf-phone");
+        var btnCheckPremium = document.getElementById("btnCheckPremium");
+        
+        var chk1 = document.getElementById("agree1");
+        var chk2 = document.getElementById("agree2");
+        
+        var termModal = document.getElementById("termModal");
+        var closeTermModal = document.getElementById("closeTermModal");
+        var termTitle = document.getElementById("termModalTitle");
+        
+        var btnCollapse = document.getElementById("btnCollapseWidget");
+
+        if(btnCollapse && widget) {
+          btnCollapse.addEventListener("click", function() {
+            widget.classList.add("is-collapsed");
+          });
+        }
+
+        if(phoneInput) phoneInput.addEventListener("input", function(){ this.value = this.value.replace(/[^0-9]/g, "").slice(0, 11); });
+
+        if(btnCheckPremium) {
+            btnCheckPremium.addEventListener("click", function() {
+                if(widget.classList.contains("is-collapsed")) {
+                  widget.classList.remove("is-collapsed");
+                  return; 
+                }
+
+                var nameVal = nameInput.value.trim();
+                if(!/^[가-힣a-zA-Z]{2,}$/.test(nameVal)) { alert("정상적인 이름을 입력해 주세요 (자음/모음 불가, 2자 이상)"); nameInput.focus(); return; }
+                
+                var rawPhone = phoneInput.value.trim();
+                if(!/^010\d{8}$/.test(rawPhone)) { alert("휴대폰 번호를 정확히 입력해 주세요 (010으로 시작하는 11자리 숫자)"); phoneInput.focus(); return; }
+                
+                // 필수 체크 확인
+                if(!chk1.checked || !chk2.checked) {
+                    alert("필수 약관에 모두 동의해주셔야 상담 신청이 가능합니다.");
+                    return;
+                }
+                
+                // === [추가된 부분] 채널톡으로 고객 정보 전송 시작 ===
+                try {
+                    // 휴대폰 번호를 채널톡 포맷(+8210...)으로 변환
+                    var formattedPhone = "+82" + rawPhone.substring(1); 
+                    
+                    if(window.ChannelIO) {
+                        window.ChannelIO('updateUser', {
+                            profile: {
+                                name: nameVal,          // 이름
+                                mobileNumber: formattedPhone, // +82... 형식의 전화번호
+                                inquiry_type: '순시미_홈페이지_상담신청' // 사용자 정의 속성 (아래 채널톡 설정 참고)
+                            }
+                        }, function(error, user) {
+                            if(error) console.error("채널톡 유저 업데이트 실패:", error);
+                            else console.log("채널톡 유저 정보 업데이트 성공");
+                        });
+                    }
+                } catch(chErr) {
+                    console.warn("채널톡 연동 에러(무시하고 진행):", chErr);
+                }
+                // === [추가된 부분] 끝 ===
+
+                // 구글 시트 전송
+                var payload = {
+                  name: nameInput.value,
+                  phone: phoneInput.value,
+                  birth: "", // 호환용 빈값
+                  gender: "" // 호환용 빈값
+                };
+
+                btnCheckPremium.innerText = "전송 중...";
+                btnCheckPremium.disabled = true;
+
+                fetch(GOOGLE_SCRIPT_URL, {
+                  method: "POST",
+                  mode: "no-cors", 
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+                })
+                .then(function() {
+                   alert("간편 상담 신청이 완료되었습니다.");
+                   nameInput.value=""; phoneInput.value="";
+                })
+                .catch(function(err) {
+                   console.error(err);
+                   alert("전송 중 오류가 발생했습니다.");
+                })
+                .finally(function() {
+                   btnCheckPremium.innerText = "간편 상담 신청";
+                   btnCheckPremium.disabled = false;
+                });
+            });
+        }
+
+        // 약관 상세 보기
+        var viewBtns = document.querySelectorAll(".pf-view-detail");
+        viewBtns.forEach(function(btn) {
+            btn.addEventListener("click", function() {
+                var targetId = this.getAttribute("data-target");
+                document.querySelectorAll(".pf-term-text-block").forEach(function(el){ el.classList.remove("is-active"); });
+                document.getElementById(targetId).classList.add("is-active");
+                
+                if(targetId === "termText1") termTitle.innerText = "개인정보 수집 및 이용 동의";
+                else termTitle.innerText = "개인정보 제3자 제공 동의";
+                
+                termModal.style.display = "flex";
+            });
+        });
+
+        if(closeTermModal) {
+            closeTermModal.addEventListener("click", function(){ termModal.style.display = "none"; });
+            termModal.addEventListener("click", function(e){ if(e.target === termModal) termModal.style.display = "none"; });
+        }
+
+        if(window.ChannelIO) {
+            window.ChannelIO('boot', {
+                "pluginKey": "a51428ca-e0d0-4ef8-bcfd-fbe896cc0f4b",
+                "hideChannelButtonOnBoot": true,
+                "hidePopup": true
+            });
+        }
+        var chatBtn = document.getElementById("pf-channel-talk-btn");
+        if(chatBtn) chatBtn.addEventListener("click", function(e) { e.preventDefault(); window.ChannelIO('showMessenger'); });
+        
+        var mobileChatBtn = document.getElementById("pf-mobile-chat-btn");
+        if(mobileChatBtn) mobileChatBtn.addEventListener("click", function(e) { e.preventDefault(); window.ChannelIO('showMessenger'); });
+
+      } catch(err) {
+        console.warn("위젯 로직 오류:", err);
+      }
+    }
+
+    if (document.readyState === 'complete') {
+      loadChannelIO();
+      initWidget();
+    } else {
+      window.addEventListener('DOMContentLoaded', loadChannelIO);
+      window.addEventListener('load', initWidget);
+    }
+  } catch (e) {
+    console.error("스크립트 초기화 실패:", e);
+  }
+})();
+</script>

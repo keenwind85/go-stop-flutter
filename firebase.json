@@ -1,0 +1,17 @@
+{
+  "flutter": {
+    "platforms": {
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "go-stop-flutter",
+          "configurations": {
+            "web": "1:37532106702:web:da8314e32012a0846a359f"
+          }
+        }
+      }
+    }
+  },
+  "database": {
+    "rules": "database.rules.json"
+  }
+}
