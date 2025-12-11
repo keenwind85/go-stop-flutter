@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import '../../../models/captured_cards.dart';
 import '../../../models/card_data.dart';
 import '../../../config/constants.dart';
@@ -228,16 +229,17 @@ class OpponentZone extends StatelessWidget {
   }
 
   Widget _buildScoreAndHandSection() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 코인 잔액 표시
-        if (coinBalance != null)
-          Flexible(
-            child: Container(
+    return IntrinsicHeight(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 코인 잔액 표시
+          if (coinBalance != null) ...[
+            Container(
+              alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-              margin: const EdgeInsets.only(right: 6),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(6),
@@ -246,7 +248,15 @@ class OpponentZone extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('🪙', style: TextStyle(fontSize: 12)),
+                  Lottie.asset(
+                    'assets/etc/Coin.json',
+                    width: 16,
+                    height: 16,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Text('🪙', style: TextStyle(fontSize: 12));
+                    },
+                  ),
                   const SizedBox(width: 2),
                   Text(
                     '$coinBalance',
@@ -260,26 +270,28 @@ class OpponentZone extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-        // 점수 (큰 폰트)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.6), // 디지털 디스플레이 느낌
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.woodDark, width: 2),
-          ),
-          child: Text(
-            '$score점',
-            style: const TextStyle(
-              color: AppColors.text,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Courier',
+            const SizedBox(width: 8),
+          ],
+          // 점수 (큰 폰트)
+          Container(
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.woodDark, width: 2),
+            ),
+            child: Text(
+              '$score점',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -425,14 +437,14 @@ class OpponentZone extends StatelessWidget {
     );
   }
 
-  /// 턴 타이머 표시 위젯 (우하단에 위치)
+  /// 턴 타이머 표시 위젯 (우상단에 위치 - 잘림 방지)
   Widget _buildTimerDisplay() {
     final isUrgent = remainingSeconds != null && remainingSeconds! <= 10;
     final displayText = remainingSeconds != null ? '$remainingSeconds초 남았습니다...' : '';
 
     return Positioned(
       right: 12,
-      bottom: 4,
+      top: 4,  // bottom에서 top으로 변경하여 잘림 방지
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

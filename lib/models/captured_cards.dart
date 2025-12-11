@@ -17,6 +17,9 @@ class CapturedCards {
   /// 전체 먹은 카드 수
   int get totalCount => kwang.length + animal.length + ribbon.length + pi.length;
 
+  /// 모든 먹은 카드 목록 (디버그용)
+  List<CardData> get allCards => [...kwang, ...animal, ...ribbon, ...pi];
+
   /// 피 장수 계산 (쌍피, 보너스피는 2장으로 계산)
   int get piCount {
     int count = 0;

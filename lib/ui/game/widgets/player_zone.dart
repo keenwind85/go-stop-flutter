@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import '../../../models/captured_cards.dart';
 import '../../../models/card_data.dart';
 import '../../../config/constants.dart';
-import '../game_screen_new.dart';
 import 'game_card_widget.dart';
 
 /// Bottom Zone: 플레이어 영역 (화면 하단 40%)
@@ -37,6 +38,11 @@ class PlayerZone extends StatelessWidget {
   /// 획득 영역 GlobalKey (카드 획득 애니메이션 목적지)
   final GlobalKey? captureZoneKey;
 
+  /// 디버그 모드 관련
+  final bool debugModeActive;
+  final void Function(CardData)? onCardLongPress;  // 디버그: 손패 카드 변경
+  final VoidCallback? onDebugModeActivate;         // 디버그: 모드 발동
+
   const PlayerZone({
     super.key,
     this.playerName,
@@ -56,6 +62,9 @@ class PlayerZone extends StatelessWidget {
     this.remainingSeconds,
     this.getCardKey,
     this.captureZoneKey,
+    this.debugModeActive = false,
+    this.onCardLongPress,
+    this.onDebugModeActivate,
   });
 
   @override
@@ -415,66 +424,79 @@ class PlayerZone extends StatelessWidget {
           ),
 
           // 점수 + 코인 (우측 정렬)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 점수
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6), // 디지털 디스플레이 느낌
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: AppColors.woodDark,
-                    width: 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      blurRadius: 0,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  '$score점',
-                  style: const TextStyle(
-                    color: AppColors.cardHighlight,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'Courier', // 디지털 폰트 느낌 (없으면 기본 폰트)
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ),
-              // 코인 잔액 표시 (점수 옆)
-              if (coinBalance != null) ...[
-                const SizedBox(width: 8),
+          IntrinsicHeight(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 점수
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
+                    color: Colors.black.withValues(alpha: 0.6), // 디지털 디스플레이 느낌
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.woodDark, width: 2),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('🪙', style: TextStyle(fontSize: 14)),
-                      const SizedBox(width: 4),
-                      Text(
-                        '$coinBalance',
-                        style: const TextStyle(
-                          color: Colors.amber,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    border: Border.all(
+                      color: AppColors.woodDark,
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        blurRadius: 0,
+                        offset: const Offset(0, 1),
                       ),
                     ],
                   ),
+                  child: Text(
+                    '$score점',
+                    style: const TextStyle(
+                      color: AppColors.cardHighlight,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Courier', // 디지털 폰트 느낌 (없으면 기본 폰트)
+                      letterSpacing: 1.0,
+                    ),
+                  ),
                 ),
+                // 코인 잔액 표시 (점수 옆)
+                if (coinBalance != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.woodDark, width: 2),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Lottie.asset(
+                          'assets/etc/Coin.json',
+                          width: 20,
+                          height: 20,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Text('🪙', style: TextStyle(fontSize: 14));
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$coinBalance',
+                          style: const TextStyle(
+                            color: Colors.amber,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ),
@@ -511,6 +533,9 @@ class PlayerZone extends StatelessWidget {
               onCardTap: onCardTap,
               constraints: constraints,
               getCardKey: getCardKey,
+              debugModeActive: debugModeActive,
+              onCardLongPress: onCardLongPress,
+              onDebugModeActivate: onDebugModeActivate,
             ),
             // 타이머 표시 (우하단)
             if (isMyTurn && remainingSeconds != null)
@@ -642,12 +667,15 @@ class PlayerZone extends StatelessWidget {
 }
 
 /// 부채꼴 손패 레이아웃
-class _FanHandLayout extends StatelessWidget {
+class _FanHandLayout extends StatefulWidget {
   final List<CardData> cards;
   final CardData? selectedCard;
   final Function(CardData) onCardTap;
   final BoxConstraints constraints;
   final GlobalKey Function(String cardId)? getCardKey;
+  final bool debugModeActive;
+  final void Function(CardData)? onCardLongPress;
+  final VoidCallback? onDebugModeActivate;
 
   const _FanHandLayout({
     required this.cards,
@@ -655,7 +683,50 @@ class _FanHandLayout extends StatelessWidget {
     required this.onCardTap,
     required this.constraints,
     this.getCardKey,
+    this.debugModeActive = false,
+    this.onCardLongPress,
+    this.onDebugModeActivate,
   });
+
+  @override
+  State<_FanHandLayout> createState() => _FanHandLayoutState();
+}
+
+class _FanHandLayoutState extends State<_FanHandLayout> {
+  Timer? _longPressTimer;
+  CardData? _longPressCard;
+  static const int _debugModeLongPressDuration = 5; // 5초
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onLongPressStart(CardData card) {
+    _longPressCard = card;
+    _longPressTimer?.cancel();
+    _longPressTimer = Timer(
+      Duration(seconds: _debugModeLongPressDuration),
+      () {
+        if (_longPressCard != null) {
+          if (widget.debugModeActive) {
+            // 디버그 모드 활성화 상태: 카드 변경 다이얼로그 열기
+            widget.onCardLongPress?.call(_longPressCard!);
+          } else {
+            // 디버그 모드 비활성화 상태: 디버그 모드 발동
+            widget.onDebugModeActivate?.call();
+          }
+        }
+      },
+    );
+  }
+
+  void _onLongPressEnd() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _longPressCard = null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -668,23 +739,23 @@ class _FanHandLayout extends StatelessWidget {
 
     // 카드 수에 따른 각도 간격
     final angleStep =
-        cards.length > 1 ? totalAngleRange / (cards.length - 1) : 0.0;
+        widget.cards.length > 1 ? totalAngleRange / (widget.cards.length - 1) : 0.0;
 
     // 중심점
-    final centerX = constraints.maxWidth / 2;
-    final centerY = constraints.maxHeight + 100; // 화면 아래쪽에 원 중심
+    final centerX = widget.constraints.maxWidth / 2;
+    final centerY = widget.constraints.maxHeight + 100; // 화면 아래쪽에 원 중심
 
     // 부채꼴 반지름
-    final radius = constraints.maxHeight * 0.8 + 50;
+    final radius = widget.constraints.maxHeight * 0.8 + 50;
 
     return Stack(
       clipBehavior: Clip.none,
-      children: List.generate(cards.length, (index) {
-        final card = cards[index];
-        final isSelected = selectedCard == card;
+      children: List.generate(widget.cards.length, (index) {
+        final card = widget.cards[index];
+        final isSelected = widget.selectedCard == card;
 
         // 각도 계산 (중앙부터 양쪽으로)
-        final angle = cards.length > 1
+        final angle = widget.cards.length > 1
             ? -maxAngle + (index * angleStep)
             : 0.0; // 단일 카드는 중앙
 
@@ -696,13 +767,16 @@ class _FanHandLayout extends StatelessWidget {
         final yOffset = isSelected ? -20.0 : 0.0;
 
         // GlobalKey 가져오기 (위치 추적용)
-        final cardKey = getCardKey?.call(card.id);
+        final cardKey = widget.getCardKey?.call(card.id);
 
         return Positioned(
           left: x,
           top: y + yOffset,
           child: GestureDetector(
-            onTap: () => onCardTap(card),
+            onTap: () => widget.onCardTap(card),
+            onLongPressStart: (_) => _onLongPressStart(card),
+            onLongPressEnd: (_) => _onLongPressEnd(),
+            onLongPressCancel: _onLongPressEnd,
             child: Transform.rotate(
               angle: angle,
               alignment: Alignment.bottomCenter,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 
 /// 光끼 게이지 위젯 (불타는 애니메이션 아이콘 + 게이지)
 class GwangkkiGauge extends StatefulWidget {
@@ -114,7 +115,7 @@ class _GwangkkiGaugeState extends State<GwangkkiGauge>
   Widget _buildFullGauge(Color gaugeColor, double glowIntensity) {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // 라벨 표시
         if (widget.showLabel) ...[
@@ -188,36 +189,20 @@ class _GwangkkiGaugeState extends State<GwangkkiGauge>
     return AnimatedBuilder(
       animation: _flameAnimation,
       builder: (context, child) {
-        final intensity = _getGlowIntensity();
         return Transform.scale(
           scale: _flameAnimation.value,
-          child: ShaderMask(
-            shaderCallback: (bounds) => LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                Colors.red,
-                Colors.orange,
-                Colors.yellow,
-              ],
-            ).createShader(bounds),
-            child: Icon(
-              Icons.local_fire_department,
-              size: size,
-              color: Colors.white,
-              shadows: intensity > 0.5
-                  ? [
-                      Shadow(
-                        color: Colors.orange.withValues(alpha: intensity),
-                        blurRadius: 8 * intensity,
-                      ),
-                      Shadow(
-                        color: Colors.red.withValues(alpha: intensity * 0.7),
-                        blurRadius: 12 * intensity,
-                      ),
-                    ]
-                  : null,
-            ),
+          child: Lottie.asset(
+            'assets/etc/Fire.json',
+            width: size,
+            height: size,
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) {
+              return Icon(
+                Icons.local_fire_department,
+                size: size,
+                color: Colors.orange,
+              );
+            },
           ),
         );
       },

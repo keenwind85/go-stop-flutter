@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lottie/lottie.dart';
 import '../../models/card_data.dart';
 import '../../models/game_room.dart';
 import '../../models/user_wallet.dart';
@@ -16,7 +17,10 @@ import '../widgets/special_event_overlay.dart';
 import '../widgets/card_selection_dialog.dart';
 import '../widgets/action_buttons.dart';
 import '../widgets/shake_cards_overlay.dart';
+import '../widgets/bomb_cards_overlay.dart';
 import '../widgets/chongtong_cards_overlay.dart';
+import '../widgets/september_animal_choice_dialog.dart';
+import '../widgets/special_rule_lottie_overlay.dart';
 import '../screens/lobby_screen.dart';
 import 'widgets/opponent_zone.dart';
 import 'widgets/floor_zone.dart';
@@ -27,6 +31,7 @@ import '../widgets/retro_background.dart';
 import '../widgets/retro_button.dart';
 import '../widgets/gwangkki_gauge.dart';
 import '../widgets/first_turn_overlay.dart';
+import '../widgets/debug_card_selector_dialog.dart';
 import '../../config/constants.dart';
 
 /// 디자인 가이드 기반 색상
@@ -92,6 +97,9 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   List<CardData> _deckSelectionOptions = [];
   CardData? _deckCardForSelection;
 
+  // 9월 열끗 선택 상태
+  bool _showingSeptemberChoice = false;
+
   // 보너스 카드 사용 애니메이션 상태
   bool _showingBonusCardEffect = false;
   CardData? _bonusCardForEffect;
@@ -106,6 +114,19 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   bool _showingChongtongCards = false;
   List<CardData> _chongtongCards = [];
   String? _chongtongWinnerName;
+
+  // 폭탄 카드 공개 오버레이 상태
+  bool _showingBombCards = false;
+  List<CardData> _bombCards = [];
+  String? _bombPlayerName;
+  CardData? _bombTargetCard;  // 획득할 카드 (애니메이션용)
+  bool _showingBombExplosion = false;  // 폭발 애니메이션 표시 여부
+  Offset? _bombExplosionPosition;  // 폭발 애니메이션 위치
+
+  // 특수 룰 로티 애니메이션 상태 (따닥, 뻑, 쪽)
+  bool _showingSpecialRuleLottie = false;
+  SpecialEvent _specialRuleEvent = SpecialEvent.none;
+  List<Offset> _specialRulePositions = [];
 
   // 선 결정 오버레이 상태
   bool _showingFirstTurnOverlay = false;
@@ -124,6 +145,9 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   Timer? _turnTimer;
   int _remainingSeconds = 60;
   static const int _turnDuration = 60;  // 60초 턴 제한
+
+  // 디버그 모드 상태
+  bool _debugModeActive = false;
 
   // 사운드
   late SoundService _soundService;
@@ -198,7 +222,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       }
 
       // 이전 재대결 상태 저장
-      final wasOpponentRematchRequested = _opponentRematchRequested;
       final wasRematchRequested = _rematchRequested;
 
       final newOpponentRematchRequested = widget.isHost
@@ -240,18 +263,36 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         }
       }
 
-      // 내가 재대결 요청 후 상대방이 수락한 경우 알림
-      if (wasRematchRequested &&
-          !wasOpponentRematchRequested &&
-          newOpponentRematchRequested &&
-          room.bothWantRematch) {
-        _showRematchAcceptedDialog();
-      }
-
       // 양쪽 모두 재대결 요청 시 게임 재시작
+      // 호스트만 startRematch 호출하여 방 상태를 waiting으로 변경
       if (room.bothWantRematch && widget.isHost) {
         _cancelRematchTimer();
         _startRematch();
+      }
+
+      // 게스트: 재대결로 방 상태가 waiting으로 변경되면 상태 초기화
+      // (호스트가 startRematch를 호출하여 방 상태를 waiting으로 변경한 경우)
+      if (!widget.isHost &&
+          previousRoom?.state == RoomState.finished &&
+          room.state == RoomState.waiting &&
+          _showingResult) {
+        _cancelRematchTimer();
+        // 이전 게임 상태를 저장하여 결과 다이얼로그 중복 표시 방지
+        final lastGameState = previousRoom?.gameState;
+        setState(() {
+          _isGameStarted = false;
+          _showingResult = false;
+          _rematchRequested = false;
+          _opponentRematchRequested = false;
+          _lastShownEvent = SpecialEvent.none;
+          // 이전 게임 상태를 유지하여 새 게임과 구분
+          _previousGameState = lastGameState;
+          _coinTransferAmount = null;
+          // 코인 정산 완료 상태는 유지하여 중복 정산 방지
+          _coinSettlementDone = true;
+          _rematchCountdown = 15;
+          _opponentLeftDuringRematch = false;
+        });
       }
 
       // 호스트이고 방이 가득 찼으면 게임 시작
@@ -264,6 +305,16 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
 
       // 게임 상태 업데이트
       if (room.gameState != null) {
+        // 새 게임 시작 감지 (게임이 처음 시작된 경우)
+        // 재대결 후 새 게임이 시작되면 코인 정산 상태 리셋
+        if (previousRoom?.gameState == null) {
+          if (_coinSettlementDone) {
+            setState(() {
+              _coinSettlementDone = false;
+            });
+          }
+        }
+
         // 선 결정 오버레이 표시 (게임이 처음 시작된 경우)
         if (previousRoom?.gameState == null &&
             room.gameState!.firstTurnReason != null &&
@@ -341,6 +392,28 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
             });
           }
 
+          // 폭탄 이벤트: bombCards가 있으면 양쪽 플레이어 모두에게 표시
+          if (room.gameState!.lastEvent == SpecialEvent.bomb &&
+              room.gameState!.bombCards.isNotEmpty &&
+              !_showingBombCards) {
+            // 폭탄 사용자 이름 결정
+            String? playerName;
+            if (room.gameState!.bombPlayer != null) {
+              if (room.gameState!.bombPlayer == room.host.uid) {
+                playerName = room.host.displayName;
+              } else if (room.guest != null &&
+                  room.gameState!.bombPlayer == room.guest!.uid) {
+                playerName = room.guest!.displayName;
+              }
+            }
+            setState(() {
+              _bombCards = room.gameState!.bombCards;
+              _bombPlayerName = playerName ?? '상대방';
+              _bombTargetCard = room.gameState!.bombTargetCard;
+              _showingBombCards = true;
+            });
+          }
+
           _showSpecialEvent(
             room.gameState!.lastEvent,
             room.gameState!.lastEventPlayer == myUid,
@@ -363,16 +436,26 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           _showDeckSelectionDialog(room.gameState!);
         }
 
+        // 9월 열끗 선택 다이얼로그 표시
+        if (room.gameState!.waitingForSeptemberChoice &&
+            room.gameState!.septemberChoicePlayer == myUid &&
+            !_showingSeptemberChoice &&
+            !_showingResult) {
+          _showSeptemberChoiceDialog(room.gameState!);
+        }
+
         // 게임 종료 결과 표시
         // 일반 게임 종료: 이전 상태가 none이었다가 종료된 경우
         // 총통 종료: 총통 카드 오버레이가 없고, endState가 chongtong인 경우
+        // 재대결 후 새 게임에서는 결과 다이얼로그를 표시하지 않음 (_coinSettlementDone 체크)
         final isNormalGameEnd = room.gameState!.endState != GameEndState.none &&
             previousRoom?.gameState?.endState == GameEndState.none;
         final isChongtongEnd = room.gameState!.endState == GameEndState.chongtong &&
             !_showingChongtongCards &&
             room.gameState!.chongtongCards.isNotEmpty;
 
-        if ((isNormalGameEnd || isChongtongEnd) && !_showingResult) {
+        // 코인 정산이 이미 완료된 경우(재대결 후) 결과 표시 건너뛰기
+        if ((isNormalGameEnd || isChongtongEnd) && !_showingResult && !_coinSettlementDone) {
           // 총통인 경우 오버레이 먼저 표시
           if (room.gameState!.endState == GameEndState.chongtong &&
               !_showingChongtongCards &&
@@ -1280,11 +1363,177 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     // 덱 카드 선택은 취소할 수 없음 - 아무것도 하지 않음
   }
 
+  // 9월 열끗 선택 다이얼로그 표시
+  void _showSeptemberChoiceDialog(GameState gameState) {
+    if (gameState.pendingSeptemberCard == null) return;
+
+    setState(() {
+      _showingSeptemberChoice = true;
+    });
+  }
+
+  // 9월 열끗 선택 완료
+  void _onSeptemberChoiceSelected(bool useAsAnimal) async {
+    setState(() {
+      _showingSeptemberChoice = false;
+    });
+
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null || _currentRoom == null) return;
+
+    final opponentUid = widget.isHost
+        ? _currentRoom!.guest?.uid ?? ''
+        : _currentRoom!.host.uid;
+
+    final matgoLogic = ref.read(matgoLogicServiceProvider);
+    await matgoLogic.completeSeptemberChoice(
+      roomId: widget.roomId,
+      myUid: user.uid,
+      opponentUid: opponentUid,
+      playerNumber: widget.isHost ? 1 : 2,
+      useAsAnimal: useAsAnimal,
+    );
+  }
+
   void _showSpecialEvent(SpecialEvent event, bool isMyEvent) {
     _soundService.playSpecialEvent(event);
     setState(() {
       _lastShownEvent = event;
       _showingEvent = true;
+    });
+
+    // 특수 룰 로티 애니메이션 트리거 (따닥, 뻑, 쪽)
+    _triggerSpecialRuleLottie(event);
+  }
+
+  /// 특수 룰 발생 시 바닥 카드 위치에 로티 애니메이션 표시
+  void _triggerSpecialRuleLottie(SpecialEvent event) {
+    // 지원하는 이벤트인지 확인
+    if (event != SpecialEvent.ttadak &&
+        event != SpecialEvent.puk &&
+        event != SpecialEvent.jaPuk &&
+        event != SpecialEvent.kiss &&
+        event != SpecialEvent.sweep &&
+        event != SpecialEvent.sulsa) {
+      return;
+    }
+
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    // 바닥 카드에서 관련 카드 위치 찾기
+    final positions = <Offset>[];
+
+    // 최근 플레이된 카드와 관련된 바닥 카드들의 위치 찾기
+    // 이벤트 발생 시점에서 관련 카드의 월을 찾아서 해당 월의 바닥 카드들 위치를 수집
+
+    // 현재 바닥에 있는 카드들 중에서 같은 월의 카드 위치 수집
+    // 이벤트 종류에 따라 다른 처리
+    if (event == SpecialEvent.ttadak) {
+      // 따닥: 바닥에 2쌍이 매칭된 상황 - 관련 카드 4장 중 최근 착지 위치
+      // 가장 최근에 변화가 있었던 카드들의 위치 (현재 바닥의 마지막 몇 장)
+      _collectRecentFloorCardPositions(positions, 2);
+    } else if (event == SpecialEvent.puk || event == SpecialEvent.jaPuk) {
+      // 뻑: 바닥에 같은 월 카드 3장이 쌓인 상황
+      _collectStackedFloorCardPositions(positions, 3);
+    } else if (event == SpecialEvent.kiss) {
+      // 쪽: 바닥에 같은 월 카드 2장이 있고 1장을 내서 가져간 상황
+      // 획득 직전의 바닥 카드 위치 (현재 바닥에서 최근 매칭된 카드)
+      _collectRecentFloorCardPositions(positions, 1);
+    } else if (event == SpecialEvent.sweep) {
+      // 싹쓸이: 바닥 전체에 Wind 애니메이션 표시
+      // 바닥판 중앙에 큰 애니메이션 1개 표시
+      _collectFloorCenterPosition(positions);
+    } else if (event == SpecialEvent.sulsa) {
+      // 설사: 바닥에 같은 월 카드 3장이 있는 상황
+      // 설사 대상 카드들 위치에 grab 애니메이션 표시
+      _collectStackedFloorCardPositions(positions, 3);
+    }
+
+    if (positions.isNotEmpty) {
+      setState(() {
+        _showingSpecialRuleLottie = true;
+        _specialRuleEvent = event;
+        _specialRulePositions = positions;
+      });
+    }
+  }
+
+  /// 바닥판 중앙 위치 수집 (싹쓸이용)
+  void _collectFloorCenterPosition(List<Offset> positions) {
+    // 화면 레이아웃 기준 (Top: 22%, Center: 46%, Bottom: 32%)
+    // 바닥판(Center Zone)의 중앙 위치 계산
+    final screenSize = MediaQuery.of(context).size;
+    // Top Zone (22%) 아래에서 Center Zone (46%)의 중앙
+    // Center Zone 시작: 22%, 끝: 68%, 중앙: 45%
+    final floorCenterY = screenSize.height * 0.45;
+    final floorCenterX = screenSize.width / 2;
+    positions.add(Offset(floorCenterX, floorCenterY));
+  }
+
+  /// 최근 바닥 카드들의 위치 수집
+  void _collectRecentFloorCardPositions(List<Offset> positions, int count) {
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    final floorCards = gameState.floorCards;
+    final startIndex = (floorCards.length - count).clamp(0, floorCards.length);
+
+    for (var i = startIndex; i < floorCards.length; i++) {
+      final card = floorCards[i];
+      final pos = _positionTracker.getCardPosition('floor_${card.id}');
+      if (pos != null) {
+        positions.add(pos);
+      }
+    }
+
+    // 위치를 찾지 못한 경우 화면 중앙 근처 사용
+    if (positions.isEmpty) {
+      final screenSize = MediaQuery.of(context).size;
+      positions.add(Offset(screenSize.width / 2, screenSize.height * 0.4));
+    }
+  }
+
+  /// 같은 월로 쌓인 바닥 카드들의 위치 수집 (뻑 상황)
+  void _collectStackedFloorCardPositions(List<Offset> positions, int minStack) {
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    final floorCards = gameState.floorCards;
+
+    // 월별로 카드 그룹화
+    final cardsByMonth = <int, List<CardData>>{};
+    for (final card in floorCards) {
+      cardsByMonth.putIfAbsent(card.month, () => []).add(card);
+    }
+
+    // minStack 이상 쌓인 월 찾기
+    for (final entry in cardsByMonth.entries) {
+      if (entry.value.length >= minStack) {
+        for (final card in entry.value) {
+          final pos = _positionTracker.getCardPosition('floor_${card.id}');
+          if (pos != null) {
+            positions.add(pos);
+          }
+        }
+        break; // 첫 번째로 찾은 스택만 처리
+      }
+    }
+
+    // 위치를 찾지 못한 경우 화면 중앙 근처 사용
+    if (positions.isEmpty) {
+      final screenSize = MediaQuery.of(context).size;
+      positions.add(Offset(screenSize.width / 2, screenSize.height * 0.4));
+    }
+  }
+
+  /// 특수 룰 로티 애니메이션 완료
+  void _onSpecialRuleLottieComplete() {
+    setState(() {
+      _showingSpecialRuleLottie = false;
+      _specialRuleEvent = SpecialEvent.none;
+      _specialRulePositions = [];
     });
   }
 
@@ -1691,34 +1940,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     );
   }
 
-  void _showRematchAcceptedDialog() {
-    if (!mounted) return;
-    _cancelRematchTimer();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2D2D2D),
-        title: const Text(
-          '재대결 수락',
-          style: TextStyle(color: Colors.amber),
-        ),
-        content: const Text(
-          '상대방이 재대결을 수락하여 게임이 시작됩니다!',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('확인'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _onExitResult() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const LobbyScreen()),
@@ -1769,6 +1990,51 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           !_showingResult) {
         _showGameResult();
       }
+    }
+  }
+
+  /// 폭탄 오버레이 닫힘 시 호출
+  /// 오버레이 종료 후 폭발 애니메이션 표시 및 실제 폭탄 실행
+  void _onBombCardsDismiss() async {
+    if (!mounted) return;
+
+    final user = ref.read(authServiceProvider).currentUser;
+    if (user == null) return;
+
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    // 오버레이 숨기고 폭발 애니메이션 시작
+    if (mounted) {
+      setState(() {
+        _showingBombCards = false;
+        _showingBombExplosion = true;
+      });
+    }
+
+    // 내가 폭탄 사용자인 경우에만 executeBomb 호출
+    if (gameState.bombPlayer == user.uid) {
+      final matgoLogic = ref.read(matgoLogicServiceProvider);
+      await matgoLogic.executeBomb(
+        roomId: widget.roomId,
+        myUid: user.uid,
+        opponentUid: widget.isHost
+            ? _currentRoom!.guest!.uid
+            : _currentRoom!.host.uid,
+        playerNumber: widget.isHost ? 1 : 2,
+      );
+    }
+
+    // 폭발 애니메이션 완료 대기 (3초)
+    await Future.delayed(const Duration(seconds: 3));
+
+    if (mounted) {
+      setState(() {
+        _showingBombExplosion = false;
+        _bombCards = [];
+        _bombPlayerName = null;
+        _bombTargetCard = null;
+      });
     }
   }
 
@@ -1833,6 +2099,382 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         ],
       ),
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 디버그 모드 메서드
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// 디버그 모드 발동 (5초 롱프레스)
+  void _activateDebugMode() {
+    if (_debugModeActive) return;
+
+    setState(() => _debugModeActive = true);
+
+    // 디버그 모드 발동 알림
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.bug_report, color: Colors.white),
+            const SizedBox(width: 8),
+            const Text('디버그 모드 활성화! 턴 제한 해제, 카드 변경 가능'),
+          ],
+        ),
+        backgroundColor: Colors.deepPurple,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+
+    // 턴 타이머 정지
+    _turnTimer?.cancel();
+  }
+
+  /// 디버그: 손패 카드 변경
+  Future<void> _debugChangeHandCard(CardData currentCard) async {
+    if (!_debugModeActive) return;
+
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    // 이미 획득된 카드는 선택 불가
+    final capturedCardIds = _getCapturedCardIds(gameState);
+
+    final selectedCard = await showDialog<CardData>(
+      context: context,
+      builder: (context) => DebugCardSelectorDialog(
+        currentCard: currentCard,
+        usedCardIds: capturedCardIds,
+        location: '내 손패',
+      ),
+    );
+
+    if (selectedCard != null && selectedCard.id != currentCard.id) {
+      await _applyDebugCardSwap(
+        oldCard: currentCard,
+        newCard: selectedCard,
+        sourceLocation: 'hand',
+      );
+    }
+  }
+
+  /// 디버그: 바닥 카드 변경
+  Future<void> _debugChangeFloorCard(CardData currentCard) async {
+    if (!_debugModeActive) return;
+
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    // 이미 획득된 카드는 선택 불가
+    final capturedCardIds = _getCapturedCardIds(gameState);
+
+    final selectedCard = await showDialog<CardData>(
+      context: context,
+      builder: (context) => DebugCardSelectorDialog(
+        currentCard: currentCard,
+        usedCardIds: capturedCardIds,
+        location: '바닥패',
+      ),
+    );
+
+    if (selectedCard != null && selectedCard.id != currentCard.id) {
+      await _applyDebugCardSwap(
+        oldCard: currentCard,
+        newCard: selectedCard,
+        sourceLocation: 'floor',
+      );
+    }
+  }
+
+  /// 디버그: 덱 맨 윗장 카드 변경
+  Future<void> _debugChangeDeckTopCard() async {
+    if (!_debugModeActive) return;
+
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null || gameState.deck.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('덱이 비어있습니다'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final topCard = gameState.deck.first;
+
+    // 이미 획득된 카드는 선택 불가
+    final capturedCardIds = _getCapturedCardIds(gameState);
+
+    final selectedCard = await showDialog<CardData>(
+      context: context,
+      builder: (context) => DebugCardSelectorDialog(
+        currentCard: topCard,
+        usedCardIds: capturedCardIds,
+        location: '덱 맨 윗장',
+      ),
+    );
+
+    if (selectedCard != null && selectedCard.id != topCard.id) {
+      await _applyDebugCardSwap(
+        oldCard: topCard,
+        newCard: selectedCard,
+        sourceLocation: 'deck',
+      );
+    }
+  }
+
+  /// 이미 획득된 카드 ID 세트를 반환 (디버그 모드에서 교환 불가 카드)
+  Set<String> _getCapturedCardIds(GameState gameState) {
+    final capturedIds = <String>{};
+
+    // 플레이어1 획득 카드
+    for (final card in gameState.player1Captured.allCards) {
+      capturedIds.add(card.id);
+    }
+
+    // 플레이어2 획득 카드
+    for (final card in gameState.player2Captured.allCards) {
+      capturedIds.add(card.id);
+    }
+
+    return capturedIds;
+  }
+
+  /// 선택한 카드가 어디에 있는지 찾기
+  String? _findCardLocation(CardData card, GameState gameState) {
+    // 플레이어1 손패
+    if (gameState.player1Hand.any((c) => c.id == card.id)) {
+      return 'player1Hand';
+    }
+    // 플레이어2 손패
+    if (gameState.player2Hand.any((c) => c.id == card.id)) {
+      return 'player2Hand';
+    }
+    // 바닥
+    if (gameState.floorCards.any((c) => c.id == card.id)) {
+      return 'floor';
+    }
+    // 덱
+    if (gameState.deck.any((c) => c.id == card.id)) {
+      return 'deck';
+    }
+    // 뻑 카드
+    if (gameState.pukCards.any((c) => c.id == card.id)) {
+      return 'puk';
+    }
+    // 플레이어1 획득 카드
+    if (gameState.player1Captured.allCards.any((c) => c.id == card.id)) {
+      return 'player1Captured';
+    }
+    // 플레이어2 획득 카드
+    if (gameState.player2Captured.allCards.any((c) => c.id == card.id)) {
+      return 'player2Captured';
+    }
+    return null;
+  }
+
+  /// 디버그 카드 맞교환을 Firebase에 적용
+  Future<void> _applyDebugCardSwap({
+    required CardData oldCard,
+    required CardData newCard,
+    required String sourceLocation,
+  }) async {
+    final gameState = _currentRoom?.gameState;
+    if (gameState == null) return;
+
+    final roomService = ref.read(roomServiceProvider);
+
+    try {
+      // newCard가 어디에 있는지 찾기
+      final targetLocation = _findCardLocation(newCard, gameState);
+
+      if (targetLocation == null) {
+        // 게임에 없는 카드면 단순 교체
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('선택한 카드를 찾을 수 없습니다'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 획득 카드와의 교환 불가
+      if (targetLocation == 'player1Captured' || targetLocation == 'player2Captured') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('이미 획득한 카드와는 교환할 수 없습니다'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 새 게임 상태 생성
+      List<CardData> newPlayer1Hand = List.from(gameState.player1Hand);
+      List<CardData> newPlayer2Hand = List.from(gameState.player2Hand);
+      List<CardData> newFloorCards = List.from(gameState.floorCards);
+      List<CardData> newDeck = List.from(gameState.deck);
+      List<CardData> newPukCards = List.from(gameState.pukCards);
+
+      // 먼저 양쪽 인덱스를 찾아둠 (교환 전에 찾아야 함)
+      int sourceIdx = -1;
+      int targetIdx = -1;
+
+      // sourceLocation에서 oldCard 인덱스 찾기
+      switch (sourceLocation) {
+        case 'hand':
+          if (widget.isHost) {
+            sourceIdx = newPlayer1Hand.indexWhere((c) => c.id == oldCard.id);
+          } else {
+            sourceIdx = newPlayer2Hand.indexWhere((c) => c.id == oldCard.id);
+          }
+          break;
+        case 'floor':
+          sourceIdx = newFloorCards.indexWhere((c) => c.id == oldCard.id);
+          break;
+        case 'deck':
+          sourceIdx = newDeck.indexWhere((c) => c.id == oldCard.id);
+          break;
+      }
+
+      // targetLocation에서 newCard 인덱스 찾기
+      switch (targetLocation) {
+        case 'player1Hand':
+          targetIdx = newPlayer1Hand.indexWhere((c) => c.id == newCard.id);
+          break;
+        case 'player2Hand':
+          targetIdx = newPlayer2Hand.indexWhere((c) => c.id == newCard.id);
+          break;
+        case 'floor':
+          targetIdx = newFloorCards.indexWhere((c) => c.id == newCard.id);
+          break;
+        case 'deck':
+          targetIdx = newDeck.indexWhere((c) => c.id == newCard.id);
+          break;
+        case 'puk':
+          targetIdx = newPukCards.indexWhere((c) => c.id == newCard.id);
+          break;
+      }
+
+      // 인덱스를 찾은 후 동시에 교환
+      if (sourceIdx != -1) {
+        switch (sourceLocation) {
+          case 'hand':
+            if (widget.isHost) {
+              newPlayer1Hand[sourceIdx] = newCard;
+            } else {
+              newPlayer2Hand[sourceIdx] = newCard;
+            }
+            break;
+          case 'floor':
+            newFloorCards[sourceIdx] = newCard;
+            break;
+          case 'deck':
+            newDeck[sourceIdx] = newCard;
+            break;
+        }
+      }
+
+      if (targetIdx != -1) {
+        switch (targetLocation) {
+          case 'player1Hand':
+            newPlayer1Hand[targetIdx] = oldCard;
+            break;
+          case 'player2Hand':
+            newPlayer2Hand[targetIdx] = oldCard;
+            break;
+          case 'floor':
+            newFloorCards[targetIdx] = oldCard;
+            break;
+          case 'deck':
+            newDeck[targetIdx] = oldCard;
+            break;
+          case 'puk':
+            newPukCards[targetIdx] = oldCard;
+            break;
+        }
+      }
+
+      // 위치 이름 변환
+      String getLocationName(String loc) {
+        switch (loc) {
+          case 'hand': return '내 손패';
+          case 'floor': return '바닥';
+          case 'deck': return '덱';
+          case 'player1Hand': return '플레이어1 손패';
+          case 'player2Hand': return '플레이어2 손패';
+          case 'puk': return '뻑 카드';
+          default: return loc;
+        }
+      }
+
+      // 업데이트된 게임 상태
+      final updatedState = GameState(
+        turn: gameState.turn,
+        player1Hand: newPlayer1Hand,
+        player2Hand: newPlayer2Hand,
+        floorCards: newFloorCards,
+        deck: newDeck,
+        pukCards: newPukCards,
+        pukOwner: gameState.pukOwner,
+        player1Captured: gameState.player1Captured,
+        player2Captured: gameState.player2Captured,
+        scores: gameState.scores,
+        lastEvent: gameState.lastEvent,
+        lastEventPlayer: gameState.lastEventPlayer,
+        endState: gameState.endState,
+        winner: gameState.winner,
+        finalScore: gameState.finalScore,
+        waitingForGoStop: gameState.waitingForGoStop,
+        goStopPlayer: gameState.goStopPlayer,
+        shakeCards: gameState.shakeCards,
+        shakePlayer: gameState.shakePlayer,
+        chongtongCards: gameState.chongtongCards,
+        chongtongPlayer: gameState.chongtongPlayer,
+        firstTurnPlayer: gameState.firstTurnPlayer,
+        firstTurnDecidingMonth: gameState.firstTurnDecidingMonth,
+        firstTurnReason: gameState.firstTurnReason,
+        waitingForDeckSelection: gameState.waitingForDeckSelection,
+        deckSelectionPlayer: gameState.deckSelectionPlayer,
+        deckCard: gameState.deckCard,
+        deckMatchingCards: gameState.deckMatchingCards,
+        pendingHandCard: gameState.pendingHandCard,
+        pendingHandMatch: gameState.pendingHandMatch,
+        turnStartTime: gameState.turnStartTime,
+      );
+
+      await roomService.updateGameState(
+        roomId: widget.roomId,
+        gameState: updatedState,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '맞교환 완료: ${oldCard.id}(${getLocationName(sourceLocation)}) ↔ ${newCard.id}(${getLocationName(targetLocation)})'
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('카드 변경 실패: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _leaveRoom() async {
@@ -1975,6 +2617,11 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                               ? gameState?.player1Hand.isEmpty ?? true
                               : gameState?.player2Hand.isEmpty ?? true),
                           isMyTurn: isMyTurn,
+                          // 디버그 모드 관련
+                          debugModeActive: _debugModeActive,
+                          onFloorCardLongPress: _debugChangeFloorCard,
+                          onDeckLongPress: _debugChangeDeckTopCard,
+                          onDebugModeActivate: _activateDebugMode,
                         ),
                         // 光끼 모드 불꽃 테두리 효과
                         if (_gwangkkiModeActive)
@@ -2053,6 +2700,10 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                           remainingSeconds: isMyTurn ? _remainingSeconds : null,
                           getCardKey: (cardId) => _positionTracker.getKey('hand_$cardId'),
                           captureZoneKey: _playerCaptureKey,
+                          // 디버그 모드 관련
+                          debugModeActive: _debugModeActive,
+                          onCardLongPress: _debugChangeHandCard,
+                          onDebugModeActivate: _activateDebugMode,
                         ),
                         if (!isMyTurn)
                           Positioned.fill(
@@ -2186,6 +2837,31 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                   onDismiss: _onChongtongCardsDismiss,
                 ),
 
+              // 폭탄 카드 공개 오버레이
+              if (_showingBombCards && _bombCards.isNotEmpty)
+                BombCardsOverlay(
+                  cards: _bombCards,
+                  playerName: _bombPlayerName ?? '상대방',
+                  onDismiss: _onBombCardsDismiss,
+                ),
+
+              // 폭탄 폭발 애니메이션 (화면 중앙에 표시)
+              if (_showingBombExplosion)
+                Center(
+                  child: SizedBox(
+                    width: 200,
+                    height: 200,
+                    child: Lottie.asset(
+                      'assets/etc/Bomb.json',
+                      fit: BoxFit.contain,
+                      repeat: false,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ),
+                ),
+
               // 光끼 모드 발동 알림 (3초간 표시)
               if (_showingGwangkkiAlert)
                 GwangkkiModeAlert(
@@ -2196,10 +2872,10 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                   onDismiss: _dismissGwangkkiAlert,
                 ),
 
-              // 光끼 모드 배너 (활성화 중 지속 표시)
+              // 光끼 모드 배너 (활성화 중 지속 표시) - 나가기 버튼(높이 28 + top 4) 아래에 배치
               if (_gwangkkiModeActive && !_showingGwangkkiAlert)
                 Positioned(
-                  top: 50,
+                  top: 36,
                   left: 0,
                   right: 0,
                   child: GwangkkiModeBanner(
@@ -2236,6 +2912,25 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                   title: '뒤집은 카드로 가져갈 패를 선택하세요',
                 ),
 
+              // 9월 열끗 선택 다이얼로그
+              if (_showingSeptemberChoice && gameState?.pendingSeptemberCard != null)
+                SeptemberAnimalChoiceDialog(
+                  card: gameState!.pendingSeptemberCard!,
+                  onChoice: _onSeptemberChoiceSelected,
+                  playerName: widget.isHost
+                      ? _currentRoom?.host.displayName ?? '플레이어'
+                      : _currentRoom?.guest?.displayName ?? '플레이어',
+                ),
+
+              // 특수 룰 로티 애니메이션 (따닥, 뻑, 쪽)
+              if (_showingSpecialRuleLottie && _specialRulePositions.isNotEmpty)
+                SpecialRuleLottieOverlay(
+                  event: _specialRuleEvent,
+                  positions: _specialRulePositions,
+                  onComplete: _onSpecialRuleLottieComplete,
+                  size: 120,
+                ),
+
               // 카드 애니메이션 오버레이
               AnimatedCardOverlay(
                 animatingCards: _cardAnimController.animatingCards,
@@ -2256,6 +2951,27 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
 
               // 카드 이펙트 (착지, 쓸어담기)
               ..._buildActiveEffects(),
+
+              // 光끼 모드 하단 불꽃 애니메이션 (화면 최하단, 좌-우 풀사이즈)
+              if (_gwangkkiModeActive)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: SizedBox(
+                      height: 80,
+                      child: Lottie.asset(
+                        'assets/etc/Fire-wall.json',
+                        fit: BoxFit.fill,
+                        repeat: true,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),

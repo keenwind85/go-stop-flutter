@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../models/card_data.dart';
 import '../../../config/constants.dart';
-import '../game_screen_new.dart';
 import 'game_card_widget.dart';
 
 /// Center Zone: 경기장/바닥 (화면 중앙 40%)
@@ -11,7 +11,7 @@ import 'game_card_widget.dart';
 /// - 중앙 덱: 쌓여있는 패 (입체감 있는 그림자)
 /// - 바닥 패: 8~12장 자연스럽게 배치 (아치형 또는 흩뿌려진 느낌)
 /// - 이펙트 레이어: 쪽, 뻑, 따닥 텍스트 표시 영역
-class FloorZone extends StatelessWidget {
+class FloorZone extends StatefulWidget {
   final List<CardData> floorCards;
   final List<CardData> pukCards; // 뻑으로 쌓인 카드들
   final int deckCount;
@@ -34,6 +34,12 @@ class FloorZone extends StatelessWidget {
   /// 내 턴인지 여부
   final bool isMyTurn;
 
+  /// 디버그 모드 관련
+  final bool debugModeActive;
+  final void Function(CardData)? onFloorCardLongPress;  // 디버그: 바닥패 카드 변경
+  final VoidCallback? onDeckLongPress;                   // 디버그: 덱 탑 카드 변경
+  final VoidCallback? onDebugModeActivate;               // 디버그: 모드 발동
+
   const FloorZone({
     super.key,
     required this.floorCards,
@@ -47,7 +53,74 @@ class FloorZone extends StatelessWidget {
     this.hiddenCardIds = const {},
     this.isHandEmpty = false,
     this.isMyTurn = false,
+    this.debugModeActive = false,
+    this.onFloorCardLongPress,
+    this.onDeckLongPress,
+    this.onDebugModeActivate,
   });
+
+  @override
+  State<FloorZone> createState() => _FloorZoneState();
+}
+
+class _FloorZoneState extends State<FloorZone> {
+  Timer? _longPressTimer;
+  CardData? _longPressCard;
+  bool _isDeckLongPress = false;
+  static const int _debugModeLongPressDuration = 5; // 5초
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onCardLongPressStart(CardData card) {
+    _longPressCard = card;
+    _isDeckLongPress = false;
+    _longPressTimer?.cancel();
+    _longPressTimer = Timer(
+      Duration(seconds: _debugModeLongPressDuration),
+      () {
+        if (_longPressCard != null) {
+          if (widget.debugModeActive) {
+            // 디버그 모드 활성화 상태: 카드 변경 다이얼로그 열기
+            widget.onFloorCardLongPress?.call(_longPressCard!);
+          } else {
+            // 디버그 모드 비활성화 상태: 디버그 모드 발동
+            widget.onDebugModeActivate?.call();
+          }
+        }
+      },
+    );
+  }
+
+  void _onDeckLongPressStart() {
+    _longPressCard = null;
+    _isDeckLongPress = true;
+    _longPressTimer?.cancel();
+    _longPressTimer = Timer(
+      Duration(seconds: _debugModeLongPressDuration),
+      () {
+        if (_isDeckLongPress) {
+          if (widget.debugModeActive) {
+            // 디버그 모드 활성화 상태: 덱 탑 카드 변경 다이얼로그 열기
+            widget.onDeckLongPress?.call();
+          } else {
+            // 디버그 모드 비활성화 상태: 디버그 모드 발동
+            widget.onDebugModeActivate?.call();
+          }
+        }
+      },
+    );
+  }
+
+  void _onLongPressEnd() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _longPressCard = null;
+    _isDeckLongPress = false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,17 +145,22 @@ class FloorZone extends StatelessWidget {
               Positioned(
                 left: constraints.maxWidth / 2 - 30,
                 top: constraints.maxHeight / 2 - 45,
-                child: DeckStack(
-                  key: deckKey,
-                  count: deckCount,
-                  cardWidth: GameConstants.cardWidth,
-                  cardHeight: GameConstants.cardHeight,
-                  // 덱 탭 가능 조건:
-                  // 1. 손패가 선택되어 있음 (일반 카드 내기)
-                  // 2. 손패가 비어있고 내 턴임 (덱만 뒤집기)
-                  onTap: (selectedHandCard != null || (isHandEmpty && isMyTurn))
-                      ? onDeckTap
-                      : null,
+                child: GestureDetector(
+                  onLongPressStart: (_) => _onDeckLongPressStart(),
+                  onLongPressEnd: (_) => _onLongPressEnd(),
+                  onLongPressCancel: _onLongPressEnd,
+                  child: DeckStack(
+                    key: widget.deckKey,
+                    count: widget.deckCount,
+                    cardWidth: GameConstants.cardWidth,
+                    cardHeight: GameConstants.cardHeight,
+                    // 덱 탭 가능 조건:
+                    // 1. 손패가 선택되어 있음 (일반 카드 내기)
+                    // 2. 손패가 비어있고 내 턴임 (덱만 뒤집기)
+                    onTap: (widget.selectedHandCard != null || (widget.isHandEmpty && widget.isMyTurn))
+                        ? widget.onDeckTap
+                        : null,
+                  ),
                 ),
               ),
 
@@ -129,11 +207,11 @@ class FloorZone extends StatelessWidget {
   /// - 21장 이상: 3중 링 또는 추가 축소
   /// - 같은 월 3장 이상: 겹쳐서 표시 (설사 대상)
   List<Widget> _buildFloorCards(BoxConstraints constraints) {
-    if (floorCards.isEmpty) return [];
+    if (widget.floorCards.isEmpty) return [];
 
     // ★ 애니메이션 중인 카드는 제외 (중복 표시 방지)
-    final visibleFloorCards = floorCards
-        .where((card) => !hiddenCardIds.contains(card.id))
+    final visibleFloorCards = widget.floorCards
+        .where((card) => !widget.hiddenCardIds.contains(card.id))
         .toList();
 
     if (visibleFloorCards.isEmpty) return [];
@@ -150,12 +228,12 @@ class FloorZone extends StatelessWidget {
     final normalCards = <CardData>[];
 
     // pukCards ID 세트 생성
-    final pukCardIds = pukCards.map((c) => c.id).toSet();
+    final pukCardIds = widget.pukCards.map((c) => c.id).toSet();
 
     for (final entry in cardsByMonth.entries) {
       if (entry.value.length >= 3) {
         // 3장 이상인 경우 뻑인지 설사인지 구분
-        final isPukStack = pukCards.isNotEmpty &&
+        final isPukStack = widget.pukCards.isNotEmpty &&
             entry.value.every((card) => pukCardIds.contains(card.id));
         if (isPukStack) {
           pukGroup[entry.key] = entry.value;
@@ -208,58 +286,68 @@ class FloorZone extends StatelessWidget {
           // 뻑 또는 설사 그룹 (3장 이상 겹쳐서 표시)
           final stackCards = item.value;
           final isPukStack = pukGroupKeys.contains(item.key);
-          final isMatchable = selectedHandCard != null &&
-              stackCards.first.month == selectedHandCard!.month;
+          final isMatchable = widget.selectedHandCard != null &&
+              stackCards.first.month == widget.selectedHandCard!.month;
 
           widgets.add(
             Positioned(
               left: x,
               top: y,
-              child: AnimatedScale(
-                scale: isMatchable ? 1.1 : 1.0,
-                duration: const Duration(milliseconds: 200),
-                child: isPukStack
-                    ? _buildPukStack(
-                        cards: stackCards,
-                        cardWidth: cardWidth,
-                        cardHeight: cardHeight,
-                        rotation: rotation,
-                        isMatchable: isMatchable,
-                      )
-                    : _buildSulsaStack(
-                        cards: stackCards,
-                        cardWidth: cardWidth,
-                        cardHeight: cardHeight,
-                        rotation: rotation,
-                        isMatchable: isMatchable,
-                      ),
+              child: GestureDetector(
+                onLongPressStart: (_) => _onCardLongPressStart(stackCards.first),
+                onLongPressEnd: (_) => _onLongPressEnd(),
+                onLongPressCancel: _onLongPressEnd,
+                child: AnimatedScale(
+                  scale: isMatchable ? 1.1 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: isPukStack
+                      ? _buildPukStack(
+                          cards: stackCards,
+                          cardWidth: cardWidth,
+                          cardHeight: cardHeight,
+                          rotation: rotation,
+                          isMatchable: isMatchable,
+                        )
+                      : _buildSulsaStack(
+                          cards: stackCards,
+                          cardWidth: cardWidth,
+                          cardHeight: cardHeight,
+                          rotation: rotation,
+                          isMatchable: isMatchable,
+                        ),
+                ),
               ),
             ),
           );
         } else {
           // 일반 카드
           final card = item as CardData;
-          final isMatchable = selectedHandCard != null &&
-              card.month == selectedHandCard!.month;
-          final cardKey = getCardKey?.call(card.id);
+          final isMatchable = widget.selectedHandCard != null &&
+              card.month == widget.selectedHandCard!.month;
+          final cardKey = widget.getCardKey?.call(card.id);
 
           widgets.add(
             Positioned(
               left: x,
               top: y,
-              child: AnimatedScale(
-                scale: isMatchable ? 1.1 : 1.0,
-                duration: const Duration(milliseconds: 200),
-                child: Container(
-                  key: cardKey,
-                  child: GameCardWidget(
-                    cardData: card,
-                    width: cardWidth,
-                    height: cardHeight,
-                    rotation: rotation,
-                    isHighlighted: isMatchable,
-                    isInteractive: isMatchable,
-                    onTap: isMatchable ? () => onFloorCardTap(card) : null,
+              child: GestureDetector(
+                onLongPressStart: (_) => _onCardLongPressStart(card),
+                onLongPressEnd: (_) => _onLongPressEnd(),
+                onLongPressCancel: _onLongPressEnd,
+                child: AnimatedScale(
+                  scale: isMatchable ? 1.1 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    key: cardKey,
+                    child: GameCardWidget(
+                      cardData: card,
+                      width: cardWidth,
+                      height: cardHeight,
+                      rotation: rotation,
+                      isHighlighted: isMatchable,
+                      isInteractive: isMatchable,
+                      onTap: isMatchable ? () => widget.onFloorCardTap(card) : null,
+                    ),
                   ),
                 ),
               ),
@@ -284,7 +372,7 @@ class FloorZone extends StatelessWidget {
     const stackOffset = 6.0; // 카드 간 오프셋
 
     return GestureDetector(
-      onTap: isMatchable ? () => onFloorCardTap(cards.first) : null,
+      onTap: isMatchable ? () => widget.onFloorCardTap(cards.first) : null,
       child: SizedBox(
         width: cardWidth + (cards.length - 1) * stackOffset,
         height: cardHeight + (cards.length - 1) * stackOffset,
@@ -324,7 +412,7 @@ class FloorZone extends StatelessWidget {
             ...cards.asMap().entries.map((entry) {
               final index = entry.key;
               final card = entry.value;
-              final cardKey = getCardKey?.call(card.id);
+              final cardKey = widget.getCardKey?.call(card.id);
 
               return Positioned(
                 left: index * stackOffset,
@@ -370,7 +458,7 @@ class FloorZone extends StatelessWidget {
     const stackOffset = 6.0; // 카드 간 오프셋
 
     return GestureDetector(
-      onTap: isMatchable ? () => onFloorCardTap(cards.first) : null,
+      onTap: isMatchable ? () => widget.onFloorCardTap(cards.first) : null,
       child: SizedBox(
         width: cardWidth + (cards.length - 1) * stackOffset,
         height: cardHeight + (cards.length - 1) * stackOffset,
@@ -410,7 +498,7 @@ class FloorZone extends StatelessWidget {
             ...cards.asMap().entries.map((entry) {
               final index = entry.key;
               final card = entry.value;
-              final cardKey = getCardKey?.call(card.id);
+              final cardKey = widget.getCardKey?.call(card.id);
 
               return Positioned(
                 left: index * stackOffset,

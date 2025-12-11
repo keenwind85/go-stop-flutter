@@ -148,6 +148,11 @@ class GameState {
   final List<CardData> shakeCards;      // 흔들기로 공개된 카드들
   final String? shakePlayer;            // 흔들기한 플레이어 uid
 
+  // 폭탄 카드 공개 (손패에서 같은 월 3장 + 바닥에 1장)
+  final List<CardData> bombCards;       // 폭탄으로 공개된 카드들 (손패 3장)
+  final String? bombPlayer;             // 폭탄 사용 플레이어 uid
+  final CardData? bombTargetCard;       // 폭탄 대상 바닥 카드 (1장)
+
   // 총통 카드 공개 (게임 시작 시 같은 월 4장)
   final List<CardData> chongtongCards;  // 총통으로 공개된 카드들
   final String? chongtongPlayer;        // 총통 플레이어 uid
@@ -167,6 +172,11 @@ class GameState {
 
   // 턴 타이머 관련
   final int? turnStartTime;             // 현재 턴 시작 시간 (밀리초 타임스탬프)
+
+  // 9월 열끗(쌍피) 선택 대기
+  final bool waitingForSeptemberChoice;   // 9월 열끗 선택 대기 중
+  final String? septemberChoicePlayer;    // 선택해야 할 플레이어 uid
+  final CardData? pendingSeptemberCard;   // 선택 대기 중인 9월 열끗 카드
 
   const GameState({
     required this.turn,
@@ -188,6 +198,9 @@ class GameState {
     this.goStopPlayer,
     this.shakeCards = const [],
     this.shakePlayer,
+    this.bombCards = const [],
+    this.bombPlayer,
+    this.bombTargetCard,
     this.chongtongCards = const [],
     this.chongtongPlayer,
     this.firstTurnPlayer,
@@ -200,6 +213,9 @@ class GameState {
     this.pendingHandCard,
     this.pendingHandMatch,
     this.turnStartTime,
+    this.waitingForSeptemberChoice = false,
+    this.septemberChoicePlayer,
+    this.pendingSeptemberCard,
   });
 
   Map<String, dynamic> toJson() {
@@ -223,6 +239,9 @@ class GameState {
       'goStopPlayer': goStopPlayer,
       'shakeCards': shakeCards.map((c) => c.toJson()).toList(),
       'shakePlayer': shakePlayer,
+      'bombCards': bombCards.map((c) => c.toJson()).toList(),
+      'bombPlayer': bombPlayer,
+      'bombTargetCard': bombTargetCard?.toJson(),
       'chongtongCards': chongtongCards.map((c) => c.toJson()).toList(),
       'chongtongPlayer': chongtongPlayer,
       'firstTurnPlayer': firstTurnPlayer,
@@ -235,6 +254,9 @@ class GameState {
       'pendingHandCard': pendingHandCard?.toJson(),
       'pendingHandMatch': pendingHandMatch?.toJson(),
       'turnStartTime': turnStartTime,
+      'waitingForSeptemberChoice': waitingForSeptemberChoice,
+      'septemberChoicePlayer': septemberChoicePlayer,
+      'pendingSeptemberCard': pendingSeptemberCard?.toJson(),
     };
   }
 
@@ -277,6 +299,11 @@ class GameState {
       goStopPlayer: json['goStopPlayer'] as String?,
       shakeCards: _parseCardList(json['shakeCards']),
       shakePlayer: json['shakePlayer'] as String?,
+      bombCards: _parseCardList(json['bombCards']),
+      bombPlayer: json['bombPlayer'] as String?,
+      bombTargetCard: json['bombTargetCard'] != null
+          ? CardData.fromJson(Map<String, dynamic>.from(json['bombTargetCard'] as Map))
+          : null,
       chongtongCards: _parseCardList(json['chongtongCards']),
       chongtongPlayer: json['chongtongPlayer'] as String?,
       firstTurnPlayer: json['firstTurnPlayer'] as String?,
@@ -295,6 +322,11 @@ class GameState {
           ? CardData.fromJson(Map<String, dynamic>.from(json['pendingHandMatch'] as Map))
           : null,
       turnStartTime: json['turnStartTime'] as int?,
+      waitingForSeptemberChoice: json['waitingForSeptemberChoice'] as bool? ?? false,
+      septemberChoicePlayer: json['septemberChoicePlayer'] as String?,
+      pendingSeptemberCard: json['pendingSeptemberCard'] != null
+          ? CardData.fromJson(Map<String, dynamic>.from(json['pendingSeptemberCard'] as Map))
+          : null,
     );
   }
 
@@ -325,6 +357,9 @@ class GameState {
     String? goStopPlayer,
     List<CardData>? shakeCards,
     String? shakePlayer,
+    List<CardData>? bombCards,
+    String? bombPlayer,
+    CardData? bombTargetCard,
     List<CardData>? chongtongCards,
     String? chongtongPlayer,
     String? firstTurnPlayer,
@@ -337,6 +372,9 @@ class GameState {
     CardData? pendingHandCard,
     CardData? pendingHandMatch,
     int? turnStartTime,
+    bool? waitingForSeptemberChoice,
+    String? septemberChoicePlayer,
+    CardData? pendingSeptemberCard,
     bool clearLastEventPlayer = false,
     bool clearPukOwner = false,
     bool clearWinner = false,
@@ -349,6 +387,10 @@ class GameState {
     bool clearPendingHandCard = false,
     bool clearPendingHandMatch = false,
     bool clearTurnStartTime = false,
+    bool clearBombPlayer = false,
+    bool clearBombTargetCard = false,
+    bool clearSeptemberChoicePlayer = false,
+    bool clearPendingSeptemberCard = false,
   }) {
     return GameState(
       turn: turn ?? this.turn,
@@ -370,6 +412,9 @@ class GameState {
       goStopPlayer: clearGoStopPlayer ? null : (goStopPlayer ?? this.goStopPlayer),
       shakeCards: shakeCards ?? this.shakeCards,
       shakePlayer: clearShakePlayer ? null : (shakePlayer ?? this.shakePlayer),
+      bombCards: bombCards ?? this.bombCards,
+      bombPlayer: clearBombPlayer ? null : (bombPlayer ?? this.bombPlayer),
+      bombTargetCard: clearBombTargetCard ? null : (bombTargetCard ?? this.bombTargetCard),
       chongtongCards: chongtongCards ?? this.chongtongCards,
       chongtongPlayer: clearChongtongPlayer ? null : (chongtongPlayer ?? this.chongtongPlayer),
       firstTurnPlayer: clearFirstTurnPlayer ? null : (firstTurnPlayer ?? this.firstTurnPlayer),
@@ -382,6 +427,9 @@ class GameState {
       pendingHandCard: clearPendingHandCard ? null : (pendingHandCard ?? this.pendingHandCard),
       pendingHandMatch: clearPendingHandMatch ? null : (pendingHandMatch ?? this.pendingHandMatch),
       turnStartTime: clearTurnStartTime ? null : (turnStartTime ?? this.turnStartTime),
+      waitingForSeptemberChoice: waitingForSeptemberChoice ?? this.waitingForSeptemberChoice,
+      septemberChoicePlayer: clearSeptemberChoicePlayer ? null : (septemberChoicePlayer ?? this.septemberChoicePlayer),
+      pendingSeptemberCard: clearPendingSeptemberCard ? null : (pendingSeptemberCard ?? this.pendingSeptemberCard),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../config/constants.dart';
 import '../../services/auth_service.dart';
@@ -732,41 +733,68 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
           ),
           child: Row(
             children: [
-              // 좌측: 코인 정보
+              // 좌측: 코인 정보 (50%)
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.monetization_on,
-                          color: AppColors.accent,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '$coin',
-                          style: const TextStyle(
+                flex: 1,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Lottie.asset(
+                        'assets/etc/Coin.json',
+                        width: 42,
+                        height: 42,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.monetization_on,
                             color: AppColors.accent,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
+                            size: 28,
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '$coin',
+                                style: const TextStyle(
+                                  color: AppColors.accent,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  height: 1.0,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 4),
+                                child: Text(
+                                  '코인',
+                                  style:
+                                      TextStyle(color: AppColors.text, fontSize: 14),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Text(
-                          '코인',
-                          style: TextStyle(color: AppColors.text, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '총 획득: $totalEarned',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                    ),
-                  ],
+                          const SizedBox(height: 2),
+                          Text(
+                            '총 획득: $totalEarned',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               // 구분선
@@ -776,11 +804,18 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                 color: AppColors.woodLight.withValues(alpha: 0.5),
                 margin: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              // 우측: 光끼 점수
-              GwangkkiGauge(
-                score: gwangkkiScore,
-                showWarning: gwangkkiScore >= 100,
-                showLabel: true,
+              // 우측: 光끼 점수 (50%)
+              Expanded(
+                flex: 1,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: GwangkkiGauge(
+                    score: gwangkkiScore,
+                    showWarning: gwangkkiScore >= 100,
+                    showLabel: true,
+                  ),
+                ),
               ),
             ],
           ),
@@ -838,23 +873,23 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   Widget _buildActionButton({
     required IconData icon,
     required String label,
-    required Color color,
+    required Color color, // color is now ignored for icon/text color but kept for function signature
     required VoidCallback onTap,
   }) {
     return RetroButton(
       onPressed: onTap,
-      color: AppColors.woodLight,
+      color: AppColors.accent, // Changed to Accent (Yellow/Gold)
       width: null,
       height: 80,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 28),
+          Icon(icon, color: Colors.black, size: 28), // Icon is now Black
           const SizedBox(height: 4),
           Text(
             label,
-            style: TextStyle(
-              color: AppColors.text,
+            style: const TextStyle(
+              color: Colors.black, // Text is now Black
               fontSize: 12,
               fontWeight: FontWeight.bold,
             ),

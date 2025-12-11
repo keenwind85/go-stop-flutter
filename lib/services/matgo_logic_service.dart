@@ -65,6 +65,21 @@ class MatgoLogicService {
 
   MatgoLogicService(this._roomService);
 
+  /// 9월 열끗 카드인지 확인 (09month_1.png)
+  /// 9월 열끗은 획득 시 열끗/쌍피 선택 가능
+  static bool isSeptemberAnimalCard(CardData card) {
+    return card.month == 9 && card.type == CardType.animal;
+  }
+
+  /// 획득 카드 목록에서 9월 열끗 찾기
+  static CardData? findSeptemberAnimalCard(List<CardData> cards) {
+    try {
+      return cards.firstWhere((c) => isSeptemberAnimalCard(c));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 덱/손패 소진 시 게임 종료 조건 체크
   ///
   /// 규칙:
@@ -603,8 +618,18 @@ class MatgoLogicService {
             if (deckMatching.isEmpty) {
               // 덱 카드 매칭 없음
 
-              // 쪽 체크: 내 패가 안 맞았는데 덱 카드가 내 패와 같은 월
-              if (!firstMatched && deckCard.month == card.month) {
+              // 뻑 체크: 내 패가 바닥 1장과 맞았는데, 덱 카드도 같은 월
+              // (바닥 카드를 이미 firstCapture로 가져갔으므로 deckMatching이 비어있음)
+              if (firstMatched && matchingFloor.length == 1 && deckCard.month == card.month) {
+                // 뻑! 3장을 바닥에 두고 종료
+                floorCards.addAll(firstCapture);
+                floorCards.add(deckCard);
+                firstCapture = [];
+                pukCards = [card, matchingFloor.first, deckCard];
+                pukOwner = myUid;
+                event = SpecialEvent.puk;
+              } else if (!firstMatched && deckCard.month == card.month) {
+                // 쪽 체크: 내 패가 안 맞았는데 덱 카드가 내 패와 같은 월
                 // 쪽! 2장 획득 + 피 1장 뺏기
                 secondCapture = [card, deckCard];
                 // 바닥에서 내 카드 제거 (방금 놓았으니)
@@ -616,28 +641,38 @@ class MatgoLogicService {
                 floorCards.add(deckCard);
               }
             } else if (deckMatching.length == 1) {
-              // 뻑 체크: 내 패가 바닥과 맞았는데, 덱 카드도 같은 월
-              if (firstMatched && deckCard.month == card.month) {
-                // 뻑! 3장을 바닥에 두고 종료
-                floorCards.addAll(firstCapture);
-                floorCards.add(deckCard);
-                firstCapture = [];
-                pukCards = [card, ...matchingFloor.take(1), deckCard];
-                pukOwner = myUid;
-                event = SpecialEvent.puk;
-              } else {
-                // 따닥 체크: 내 패가 맞고, 덱 카드도 다른 패와 맞음
-                if (firstMatched) {
-                  // 따닥! 2쌍 모두 획득 + 피 1장 뺏기
-                  secondCapture = [deckCard, deckMatching.first];
-                  floorCards.removeWhere((c) => c.id == deckMatching.first.id);
+              // 쪽 체크: 내 패가 안 맞아서 바닥에 놓았는데, 덱 카드가 내 패와 같은 월
+              // deckMatching.first가 방금 놓은 내 카드인 경우
+              if (!firstMatched && deckMatching.first.id == card.id) {
+                // 쪽! 2장 획득 + 피 1장 뺏기
+                secondCapture = [card, deckCard];
+                floorCards.removeWhere((c) => c.id == card.id);
+                event = SpecialEvent.kiss;
+                piToSteal += 1;
+              } else if (firstMatched) {
+                // 따닥 체크: 4장 모두 같은 월이어야 함
+                //
+                // 따닥 정의:
+                // - 바닥에 같은 월 2장이 있고
+                // - 내가 같은 월 1장을 내서 1장과 매칭
+                // - 덱에서 뒤집힌 카드도 같은 월이어서 남은 1장과 매칭
+                // → 4장 모두 획득 + 피 1장 뺏기
+                //
+                // 조건: 내 패(card), 덱 카드(deckCard), 덱 매칭 카드(deckMatching.first) 모두 같은 월
+
+                secondCapture = [deckCard, deckMatching.first];
+                floorCards.removeWhere((c) => c.id == deckMatching.first.id);
+
+                // 4장 모두 같은 월인지 확인 (내 패 월 == 덱 카드 월)
+                if (card.month == deckCard.month) {
                   event = SpecialEvent.ttadak;
                   piToSteal += 1;
-                } else {
-                  // 일반 1장 매칭
-                  secondCapture = [deckCard, deckMatching.first];
-                  floorCards.removeWhere((c) => c.id == deckMatching.first.id);
                 }
+                // 다른 월이면 그냥 2쌍 매칭 (따닥 아님)
+              } else {
+                // 일반 1장 매칭 (손패 안 맞음, 덱 카드만 맞음)
+                secondCapture = [deckCard, deckMatching.first];
+                floorCards.removeWhere((c) => c.id == deckMatching.first.id);
               }
             } else if (deckMatching.length == 2) {
               // 덱 카드 2장 매칭 -> 사용자 선택 필요
@@ -687,11 +722,13 @@ class MatgoLogicService {
         myCaptured = myCaptured.addCards(secondCapture);
 
         // 싹쓸이 체크: 턴 종료 시 바닥이 비어있음
+        // 싹쓸이는 다른 이벤트(따닥 등)와 동시에 발생할 수 있음
+        // 싹쓸이가 더 중요하므로 이벤트를 덮어씀
         if (floorCards.isEmpty && (firstCapture.isNotEmpty || secondCapture.isNotEmpty)) {
-          if (event == SpecialEvent.none) {
-            event = SpecialEvent.sweep;
-          }
+          // 따닥 + 싹쓸이인 경우 피 뺏기는 따닥에서 이미 1장 처리됨
+          // 싹쓸이 추가 피 뺏기
           piToSteal += 1;
+          event = SpecialEvent.sweep;  // 싹쓸이 이벤트로 설정 (따닥보다 우선)
         }
 
         // 피 뺏기
@@ -701,6 +738,32 @@ class MatgoLogicService {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
           }
+        }
+
+        // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
+        final allCapturedCards = [...firstCapture, ...secondCapture];
+        final septemberAnimal = findSeptemberAnimalCard(allCapturedCards);
+        if (septemberAnimal != null) {
+          print('[MatgoLogic] September animal card detected in playCard, waiting for choice');
+          // 현재 상태를 저장하고 9월 열끗 선택 대기 상태로 전환
+          return GameState(
+            turn: current.turn, // 턴 유지
+            turnStartTime: DateTime.now().millisecondsSinceEpoch,
+            deck: deck,
+            floorCards: floorCards,
+            player1Hand: isPlayer1 ? myHand : List<CardData>.from(current.player1Hand),
+            player2Hand: isPlayer1 ? List<CardData>.from(current.player2Hand) : myHand,
+            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
+            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            scores: current.scores,
+            lastEvent: event,
+            lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            pukCards: pukCards,
+            pukOwner: pukOwner,
+            waitingForSeptemberChoice: true,
+            septemberChoicePlayer: myUid,
+            pendingSeptemberCard: septemberAnimal,
+          );
         }
 
         // 점수 계산
@@ -902,11 +965,10 @@ class MatgoLogicService {
         myCaptured = myCaptured.addCards(capture);
 
         // 싹쓸이 체크
+        // 싹쓸이는 다른 이벤트와 동시에 발생할 수 있으므로 덮어씀
         if (floorCards.isEmpty && capture.isNotEmpty) {
-          if (event == SpecialEvent.none) {
-            event = SpecialEvent.sweep;
-          }
           piToSteal += 1;
+          event = SpecialEvent.sweep;
         }
 
         // 피 뺏기
@@ -916,6 +978,30 @@ class MatgoLogicService {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
           }
+        }
+
+        // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
+        final septemberAnimalFlip = findSeptemberAnimalCard(capture);
+        if (septemberAnimalFlip != null) {
+          print('[MatgoLogic] September animal card detected in flipDeckOnly, waiting for choice');
+          return GameState(
+            turn: current.turn,
+            turnStartTime: DateTime.now().millisecondsSinceEpoch,
+            deck: deck,
+            floorCards: floorCards,
+            player1Hand: current.player1Hand,
+            player2Hand: current.player2Hand,
+            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
+            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            scores: current.scores,
+            lastEvent: event,
+            lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            pukCards: pukCards,
+            pukOwner: pukOwner,
+            waitingForSeptemberChoice: true,
+            septemberChoicePlayer: myUid,
+            pendingSeptemberCard: septemberAnimalFlip,
+          );
         }
 
         // 점수 계산
@@ -1019,15 +1105,53 @@ class MatgoLogicService {
         final currentGoCount = isPlayer1
             ? current.scores.player1GoCount
             : current.scores.player2GoCount;
+        final newGoCount = currentGoCount + 1;
 
+        // 양쪽 손패가 모두 비었는지 확인
+        final bothHandsEmpty = current.player1Hand.isEmpty && current.player2Hand.isEmpty;
+
+        // 덱도 비었는지 확인
+        final deckEmpty = current.deck.isEmpty;
+
+        // 손패와 덱이 모두 비었으면 더 이상 진행 불가 → 고 선언자 승리
+        if (bothHandsEmpty && deckEmpty) {
+          final myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
+          final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+
+          final playerMultiplier = isPlayer1
+              ? current.scores.player1Multiplier
+              : current.scores.player2Multiplier;
+
+          // 최종 점수 계산 (고 횟수 반영)
+          final finalResult = ScoreCalculator.calculateFinalScore(
+            myCaptures: myCaptured,
+            opponentCaptures: opponentCaptured,
+            goCount: newGoCount,
+            playerMultiplier: playerMultiplier,
+          );
+
+          return current.copyWith(
+            waitingForGoStop: false,
+            clearGoStopPlayer: true,
+            scores: current.scores.copyWith(
+              player1GoCount: isPlayer1 ? newGoCount : null,
+              player2GoCount: isPlayer1 ? null : newGoCount,
+            ),
+            endState: GameEndState.win,
+            winner: myUid,
+            finalScore: finalResult.finalScore,
+          );
+        }
+
+        // 정상적인 경우: 턴을 넘기고 게임 계속
         return current.copyWith(
           turn: opponentUid,  // 턴 넘기기
           turnStartTime: DateTime.now().millisecondsSinceEpoch,  // 턴 타이머 리셋
           waitingForGoStop: false,
           clearGoStopPlayer: true,
           scores: current.scores.copyWith(
-            player1GoCount: isPlayer1 ? currentGoCount + 1 : null,
-            player2GoCount: isPlayer1 ? null : currentGoCount + 1,
+            player1GoCount: isPlayer1 ? newGoCount : null,
+            player2GoCount: isPlayer1 ? null : newGoCount,
           ),
         );
       },
@@ -1119,10 +1243,13 @@ class MatgoLogicService {
         List<CardData> secondCapture = [deckCard, selectedFloorCard];
         floorCards.removeWhere((c) => c.id == selectedFloorCard.id);
 
-        // 따닥 체크
+        // 따닥 체크: 4장 모두 같은 월이어야 함
+        // 손패로 먹은 카드(pendingHandCard)와 덱 카드(deckCard)가 같은 월인지 확인
         SpecialEvent event = SpecialEvent.none;
         int piToSteal = 0;
-        if (firstMatched) {
+        if (firstMatched &&
+            current.pendingHandCard != null &&
+            current.pendingHandCard!.month == deckCard.month) {
           event = SpecialEvent.ttadak;
           piToSteal += 1;
         }
@@ -1132,11 +1259,10 @@ class MatgoLogicService {
         myCaptured = myCaptured.addCards(secondCapture);
 
         // 싹쓸이 체크
+        // 싹쓸이는 다른 이벤트와 동시에 발생할 수 있으므로 덮어씀
         if (floorCards.isEmpty && (firstCapture.isNotEmpty || secondCapture.isNotEmpty)) {
-          if (event == SpecialEvent.none) {
-            event = SpecialEvent.sweep;
-          }
           piToSteal += 1;
+          event = SpecialEvent.sweep;
         }
 
         // 피 뺏기
@@ -1146,6 +1272,37 @@ class MatgoLogicService {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
           }
+        }
+
+        // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
+        final allCapturedDeck = [...firstCapture, ...secondCapture];
+        final septemberAnimalDeck = findSeptemberAnimalCard(allCapturedDeck);
+        if (septemberAnimalDeck != null) {
+          print('[MatgoLogic] September animal card detected in selectDeckMatchCard, waiting for choice');
+          return GameState(
+            turn: current.turn,
+            turnStartTime: DateTime.now().millisecondsSinceEpoch,
+            deck: current.deck,
+            floorCards: floorCards,
+            player1Hand: current.player1Hand,
+            player2Hand: current.player2Hand,
+            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
+            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            scores: current.scores,
+            lastEvent: event,
+            lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            pukCards: current.pukCards,
+            pukOwner: current.pukOwner,
+            waitingForDeckSelection: false,
+            deckSelectionPlayer: null,
+            deckCard: null,
+            deckMatchingCards: const [],
+            pendingHandCard: null,
+            pendingHandMatch: null,
+            waitingForSeptemberChoice: true,
+            septemberChoicePlayer: myUid,
+            pendingSeptemberCard: septemberAnimalDeck,
+          );
         }
 
         // 점수 계산
@@ -1338,7 +1495,8 @@ class MatgoLogicService {
     );
   }
 
-  /// 폭탄 선언 (손에 3장 + 바닥에 1장 = 4장 한번에 획득)
+  /// 폭탄 선언 1단계 - 오버레이 표시를 위한 상태 설정
+  /// 손에 3장 + 바닥에 1장을 보여주고, 실제 처리는 executeBomb에서 수행
   Future<bool> declareBomb({
     required String roomId,
     required String myUid,
@@ -1354,12 +1512,8 @@ class MatgoLogicService {
         }
 
         final isPlayer1 = playerNumber == 1;
-        var myHand = List<CardData>.from(
-          isPlayer1 ? current.player1Hand : current.player2Hand,
-        );
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
-        var floorCards = List<CardData>.from(current.floorCards);
+        final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
+        final floorCards = current.floorCards;
 
         // 손에 해당 월 3장, 바닥에 1장 확인
         final handCards = myHand.where((c) => c.month == month).toList();
@@ -1369,13 +1523,53 @@ class MatgoLogicService {
           return current;
         }
 
-        // 4장 모두 획득
-        for (final c in handCards) {
+        // 오버레이 표시를 위한 상태만 설정 (실제 카드 이동은 하지 않음)
+        return current.copyWith(
+          bombCards: handCards,        // 손패의 3장 (던질 카드들)
+          bombPlayer: myUid,           // 폭탄 사용자
+          bombTargetCard: floorCard.first,  // 바닥의 1장 (획득할 카드)
+          lastEvent: SpecialEvent.bomb,
+          lastEventPlayer: myUid,
+        );
+      },
+    );
+  }
+
+  /// 폭탄 선언 2단계 - 실제 카드 이동 실행
+  /// 오버레이 종료 후 호출: 손패 3장 + 바닥 1장 = 4장 모두 획득
+  Future<bool> executeBomb({
+    required String roomId,
+    required String myUid,
+    required String opponentUid,
+    required int playerNumber,
+  }) async {
+    return await _roomService.updateGameStateWithTransaction(
+      roomId: roomId,
+      updater: (current) {
+        // 폭탄 상태 확인
+        if (current.bombPlayer != myUid ||
+            current.bombCards.isEmpty ||
+            current.bombTargetCard == null) {
+          return current;
+        }
+
+        final isPlayer1 = playerNumber == 1;
+        var myHand = List<CardData>.from(
+          isPlayer1 ? current.player1Hand : current.player2Hand,
+        );
+        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
+        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        var floorCards = List<CardData>.from(current.floorCards);
+
+        // 손패에서 3장 제거하고 획득 (4장 모두 획득)
+        for (final c in current.bombCards) {
           myHand.removeWhere((h) => h.id == c.id);
           myCaptured = myCaptured.addCard(c);
         }
-        floorCards.removeWhere((f) => f.id == floorCard.first.id);
-        myCaptured = myCaptured.addCard(floorCard.first);
+
+        // 바닥의 대상 카드 1장도 획득
+        floorCards.removeWhere((f) => f.id == current.bombTargetCard!.id);
+        myCaptured = myCaptured.addCard(current.bombTargetCard!);
 
         // 피 1장 뺏기
         final (newOpponent, stolenPi) = opponentCaptured.removePi();
@@ -1394,8 +1588,9 @@ class MatgoLogicService {
           player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
           player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
           floorCards: floorCards,
-          lastEvent: SpecialEvent.bomb,
-          lastEventPlayer: myUid,
+          bombCards: [],  // 폭탄 상태 초기화
+          clearBombPlayer: true,
+          clearBombTargetCard: true,
           scores: current.scores.copyWith(
             player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
             player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
@@ -1535,5 +1730,150 @@ class MatgoLogicService {
   /// 턴 타임아웃 여부 확인
   static bool isTurnTimedOut(GameState gameState, {int turnDuration = 60}) {
     return getRemainingTurnTime(gameState, turnDuration: turnDuration) <= 0;
+  }
+
+  /// 9월 열끗 선택 완료 처리
+  ///
+  /// [useAsAnimal] true면 열끗(동물)으로, false면 쌍피로 사용
+  Future<bool> completeSeptemberChoice({
+    required String roomId,
+    required String myUid,
+    required String opponentUid,
+    required int playerNumber,
+    required bool useAsAnimal,
+  }) async {
+    return await _roomService.updateGameStateWithTransaction(
+      roomId: roomId,
+      updater: (current) {
+        // 9월 열끗 선택 대기 상태인지 확인
+        if (!current.waitingForSeptemberChoice) {
+          print('[MatgoLogic] Not waiting for September choice');
+          return current;
+        }
+
+        // 선택 권한이 있는지 확인
+        if (current.septemberChoicePlayer != myUid) {
+          print('[MatgoLogic] Not my turn to choose September card');
+          return current;
+        }
+
+        final pendingCard = current.pendingSeptemberCard;
+        if (pendingCard == null) {
+          print('[MatgoLogic] No pending September card');
+          return current;
+        }
+
+        final isPlayer1 = playerNumber == 1;
+        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
+
+        // 쌍피로 선택한 경우: animal에서 제거하고 pi에 쌍피로 추가
+        if (!useAsAnimal) {
+          // animal 목록에서 해당 카드 제거
+          final animalList = List<CardData>.from(myCaptured.animal);
+          animalList.removeWhere((c) => c.id == pendingCard.id);
+
+          // 쌍피로 변환된 카드 생성 (타입만 doublePi로 변경)
+          final asDoublePi = CardData(
+            id: pendingCard.id,
+            month: pendingCard.month,
+            index: pendingCard.index,
+            type: CardType.doublePi,
+          );
+
+          // pi 목록에 추가
+          final piList = List<CardData>.from(myCaptured.pi);
+          piList.add(asDoublePi);
+
+          // 새로운 CapturedCards 생성
+          myCaptured = CapturedCards(
+            kwang: myCaptured.kwang,
+            animal: animalList,
+            ribbon: myCaptured.ribbon,
+            pi: piList,
+          );
+
+          print('[MatgoLogic] September animal card converted to doublePi');
+        } else {
+          print('[MatgoLogic] September animal card kept as animal');
+        }
+
+        // 점수 재계산
+        final myScore = ScoreCalculator.calculateScore(myCaptured);
+        final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
+
+        // Go/Stop 체크 (7점 이상이면 선택 필요)
+        bool waitingForGoStop = false;
+        String? goStopPlayer;
+
+        if (myScore.baseTotal >= GameConstants.goStopThreshold) {
+          waitingForGoStop = true;
+          goStopPlayer = myUid;
+        }
+
+        // 다음 턴 결정
+        final nextTurn = waitingForGoStop ? myUid : opponentUid;
+
+        // 게임 종료 체크
+        GameEndState endState = GameEndState.none;
+        String? winner;
+        int finalScore = 0;
+
+        final deck = current.deck;
+        final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
+
+        if (deck.isEmpty && myHand.isEmpty && !waitingForGoStop) {
+          final scores = current.scores;
+          final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
+          final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
+          final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
+          final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
+
+          final endResult = checkGameEndOnExhaustion(
+            myScore: myScore.baseTotal,
+            opponentScore: opponentScore.baseTotal,
+            myGoCount: myGoCount,
+            opponentGoCount: opponentGoCount,
+            myUid: myUid,
+            opponentUid: opponentUid,
+            myMultiplier: myMultiplier,
+            opponentMultiplier: opponentMultiplier,
+            myCaptured: myCaptured,
+            opponentCaptured: opponentCaptured,
+          );
+
+          endState = endResult.endState;
+          winner = endResult.winner;
+          finalScore = endResult.finalScore;
+        }
+
+        return current.copyWith(
+          turn: nextTurn,
+          turnStartTime: DateTime.now().millisecondsSinceEpoch,
+          player1Captured: isPlayer1 ? myCaptured : current.player1Captured,
+          player2Captured: isPlayer1 ? current.player2Captured : myCaptured,
+          scores: ScoreInfo(
+            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
+            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
+            player1GoCount: current.scores.player1GoCount,
+            player2GoCount: current.scores.player2GoCount,
+            player1Multiplier: current.scores.player1Multiplier,
+            player2Multiplier: current.scores.player2Multiplier,
+            player1Shaking: current.scores.player1Shaking,
+            player2Shaking: current.scores.player2Shaking,
+            player1Bomb: current.scores.player1Bomb,
+            player2Bomb: current.scores.player2Bomb,
+          ),
+          endState: endState,
+          winner: winner,
+          finalScore: finalScore,
+          waitingForGoStop: waitingForGoStop,
+          goStopPlayer: goStopPlayer,
+          waitingForSeptemberChoice: false,
+          clearSeptemberChoicePlayer: true,
+          clearPendingSeptemberCard: true,
+        );
+      },
+    );
   }
 }
