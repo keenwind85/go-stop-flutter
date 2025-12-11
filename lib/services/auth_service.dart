@@ -41,19 +41,43 @@ class AuthService {
   /// 로그인 상태 변화 스트림
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
+  /// 웹: 리디렉션 로그인 결과 처리 (앱 시작 시 호출)
+  Future<void> handleRedirectResult() async {
+    try {
+      final result = await _auth.getRedirectResult();
+      final user = result.user;
+
+      if (user != null) {
+        print('[AuthService] Redirect login successful: ${user.displayName}');
+
+        // 신규 유저인지 확인 후 초기화
+        final isNewUser = result.additionalUserInfo?.isNewUser ?? false;
+        if (isNewUser) {
+          await _initializeNewUser(user);
+        } else {
+          await _ensureUserWalletExists(user);
+        }
+      }
+    } catch (e) {
+      print('[AuthService] Redirect result error: $e');
+    }
+  }
+
   /// Google 로그인
   Future<UserCredential?> signInWithGoogle() async {
     try {
       UserCredential userCredential;
 
       if (kIsWeb) {
-        // 웹: Firebase Auth의 signInWithPopup 직접 사용
-        // (google_sign_in의 signIn()은 deprecated됨)
+        // 웹: Firebase Auth의 signInWithRedirect 사용
+        // (google_sign_in의 signIn()은 deprecated됨, signInWithPopup은 불안정)
         final googleProvider = GoogleAuthProvider();
         googleProvider.addScope('email');
         googleProvider.addScope('profile');
 
-        userCredential = await _auth.signInWithPopup(googleProvider);
+        // 리디렉션으로 로그인 시작 (결과는 handleRedirectResult에서 처리)
+        await _auth.signInWithRedirect(googleProvider);
+        return null;
       } else {
         // 모바일: 기존 google_sign_in 사용
         final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();

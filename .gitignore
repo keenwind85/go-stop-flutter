@@ -47,3 +47,4 @@ app.*.map.json
 # Node modules (for Firebase functions, etc.)
 node_modules/
 package-lock.json
+node_modules
