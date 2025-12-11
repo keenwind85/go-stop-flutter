@@ -271,12 +271,22 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         _startRematch();
       }
 
+      // 게스트: 양쪽 모두 재대결 요청 시 즉시 재대결 진행 상태로 전환
+      // (호스트가 startRematch를 호출하기 전에 미리 플래그 설정)
+      if (!widget.isHost && room.bothWantRematch && !_rematchInProgress) {
+        _cancelRematchTimer();
+        debugPrint('[GameScreen] Guest: Both want rematch, setting rematchInProgress');
+        setState(() {
+          _rematchInProgress = true;
+          _showingResult = false;
+        });
+      }
+
       // 게스트: 재대결로 방 상태가 waiting으로 변경되면 상태 초기화
       // (호스트가 startRematch를 호출하여 방 상태를 waiting으로 변경한 경우)
       if (!widget.isHost &&
           previousRoom?.state == RoomState.finished &&
-          room.state == RoomState.waiting &&
-          _showingResult) {
+          room.state == RoomState.waiting) {
         _cancelRematchTimer();
         debugPrint('[GameScreen] Guest: Rematch initiated, resetting state');
         setState(() {
@@ -2891,8 +2901,8 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
               if (_showingGoStop && gameState != null)
                 _buildGoStopButtons(gameState),
 
-              // 게임 결과 다이얼로그
-              if (_showingResult && gameState != null)
+              // 게임 결과 다이얼로그 (재대결 진행 중에는 표시하지 않음)
+              if (_showingResult && gameState != null && !_rematchInProgress)
                 _buildResultDialog(gameState, myUid),
 
               // 카드 선택 다이얼로그 (손패 2장 매칭)
