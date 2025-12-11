@@ -56,7 +56,7 @@ class OpponentZone extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.only(left: 8, right: 8, top: 50, bottom: 4),
+      padding: const EdgeInsets.only(left: 4, right: 4, top: 50, bottom: 4),
       child: Column(
         children: [
           // 상단: 닉네임 + 점수 + 손패

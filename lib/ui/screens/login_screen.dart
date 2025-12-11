@@ -1,16 +1,18 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../config/constants.dart';
 import '../../services/auth_service.dart';
 import '../widgets/retro_background.dart';
 import '../widgets/retro_button.dart';
+import '../widgets/pwa_install_prompt.dart';
 
 class LoginScreen extends ConsumerWidget {
   const LoginScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
+    Widget loginContent = Scaffold(
       body: RetroBackground(
         baseColor: const Color(0xFF1D4E19),
         child: SafeArea(
@@ -89,6 +91,12 @@ class LoginScreen extends ConsumerWidget {
         ),
       ),
     ));
+
+    // 웹에서만 PWA 설치 안내 팝업 표시
+    if (kIsWeb) {
+      return PwaInstallPrompt(child: loginContent);
+    }
+    return loginContent;
   }
 
   Future<void> _signInWithGoogle(BuildContext context, WidgetRef ref) async {

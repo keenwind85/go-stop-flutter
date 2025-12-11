@@ -2105,7 +2105,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
               // 光끼 게이지 및 발동 버튼 (우하단)
               if (gameState != null && !_gwangkkiModeActive)
                 Positioned(
-                  right: 8,
+                  right: 4,
                   bottom: MediaQuery.of(context).size.height * 0.35,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -2119,7 +2119,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                       // 발동 버튼 (점수 100 이상일 때)
                       if (_canActivateGwangkki)
                         Padding(
-                          padding: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.only(top: 4),
                           child: _buildGwangkkiActivateButton(),
                         ),
                     ],
@@ -2129,7 +2129,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
               // 흔들기/폭탄 액션 버튼
               if (gameState != null && isMyTurn)
                 Positioned(
-                  left: 8,
+                  left: 4,
                   bottom: MediaQuery.of(context).size.height * 0.25,
                   child: ActionButtons(
                     myHand: widget.isHost
