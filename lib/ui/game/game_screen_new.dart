@@ -85,6 +85,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   Timer? _rematchTimer;
   int _rematchCountdown = 15;
   bool _opponentLeftDuringRematch = false;
+  bool _rematchInProgress = false; // 재대결 진행 중 플래그 (결과 UI 중복 표시 방지)
 
   // 카드 선택 상태 (손패 2장 매칭)
   bool _showingCardSelection = false;
@@ -277,21 +278,20 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           room.state == RoomState.waiting &&
           _showingResult) {
         _cancelRematchTimer();
-        // 이전 게임 상태를 저장하여 결과 다이얼로그 중복 표시 방지
-        final lastGameState = previousRoom?.gameState;
+        debugPrint('[GameScreen] Guest: Rematch initiated, resetting state');
         setState(() {
           _isGameStarted = false;
           _showingResult = false;
           _rematchRequested = false;
           _opponentRematchRequested = false;
           _lastShownEvent = SpecialEvent.none;
-          // 이전 게임 상태를 유지하여 새 게임과 구분
-          _previousGameState = lastGameState;
           _coinTransferAmount = null;
           // 코인 정산 완료 상태는 유지하여 중복 정산 방지
           _coinSettlementDone = true;
           _rematchCountdown = 15;
           _opponentLeftDuringRematch = false;
+          // 재대결 진행 중 플래그 설정 - 새 게임 시작 전까지 결과 UI 표시 차단
+          _rematchInProgress = true;
         });
       }
 
@@ -306,11 +306,13 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       // 게임 상태 업데이트
       if (room.gameState != null) {
         // 새 게임 시작 감지 (게임이 처음 시작된 경우)
-        // 재대결 후 새 게임이 시작되면 코인 정산 상태 리셋
+        // 재대결 후 새 게임이 시작되면 코인 정산 상태 및 재대결 진행 상태 리셋
         if (previousRoom?.gameState == null) {
-          if (_coinSettlementDone) {
+          if (_coinSettlementDone || _rematchInProgress) {
+            debugPrint('[GameScreen] New game started, resetting rematch flags');
             setState(() {
               _coinSettlementDone = false;
+              _rematchInProgress = false;
             });
           }
         }
@@ -447,15 +449,15 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         // 게임 종료 결과 표시
         // 일반 게임 종료: 이전 상태가 none이었다가 종료된 경우
         // 총통 종료: 총통 카드 오버레이가 없고, endState가 chongtong인 경우
-        // 재대결 후 새 게임에서는 결과 다이얼로그를 표시하지 않음 (_coinSettlementDone 체크)
+        // 재대결 후 새 게임에서는 결과 다이얼로그를 표시하지 않음 (_coinSettlementDone, _rematchInProgress 체크)
         final isNormalGameEnd = room.gameState!.endState != GameEndState.none &&
             previousRoom?.gameState?.endState == GameEndState.none;
         final isChongtongEnd = room.gameState!.endState == GameEndState.chongtong &&
             !_showingChongtongCards &&
             room.gameState!.chongtongCards.isNotEmpty;
 
-        // 코인 정산이 이미 완료된 경우(재대결 후) 결과 표시 건너뛰기
-        if ((isNormalGameEnd || isChongtongEnd) && !_showingResult && !_coinSettlementDone) {
+        // 코인 정산이 이미 완료되었거나 재대결 진행 중인 경우 결과 표시 건너뛰기
+        if ((isNormalGameEnd || isChongtongEnd) && !_showingResult && !_coinSettlementDone && !_rematchInProgress) {
           // 총통인 경우 오버레이 먼저 표시
           if (room.gameState!.endState == GameEndState.chongtong &&
               !_showingChongtongCards &&
