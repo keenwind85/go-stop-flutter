@@ -28,9 +28,10 @@ class AppColors {
 
 /// 게임 관련 상수
 class GameConstants {
-  static const double cardWidth = 65.0;
-  static const double cardHeight = 98.0;
-  static const double cardSpacing = 8.0;
+  // 카드 크기 (모바일 최적화: 기존 대비 80%)
+  static const double cardWidth = 52.0;
+  static const double cardHeight = 78.0;
+  static const double cardSpacing = 6.0;
 
   static const int cardsPerPlayer = 10;   // 손패 10장
   static const int fieldCardCount = 8;     // 바닥 8장

@@ -127,7 +127,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
 
   // 사운드
   late SoundService _soundService;
-  bool _soundEnabled = true;
 
   // 애니메이션 컨트롤러
   late AnimationController _pulseController;
@@ -1895,13 +1894,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     }
   }
 
-  void _toggleSound() {
-    setState(() {
-      _soundEnabled = !_soundEnabled;
-      _soundService.toggleMute();
-    });
-  }
-
   @override
   void dispose() {
     _roomSubscription?.cancel();
@@ -2084,33 +2076,31 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                 ],
               ),
 
-              // 상단 컨트롤 (나가기, 사운드)
+              // 상단 컨트롤 (나가기 버튼만)
               Positioned(
-                top: 8,
-                right: 8,
-                child: Row(
-                  children: [
-                    _buildControlButton(
-                      icon: _soundEnabled ? Icons.volume_up : Icons.volume_off,
-                      onTap: _toggleSound,
+                top: 4,
+                right: 4,
+                child: GestureDetector(
+                  onTap: _leaveRoom,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: AppColors.goRed.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.3),
+                        width: 1,
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    _buildControlButton(
-                      icon: Icons.exit_to_app,
-                      onTap: _leaveRoom,
-                      color: AppColors.goRed,
+                    child: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: Colors.white,
                     ),
-                  ],
+                  ),
                 ),
               ),
-
-              // 턴 표시
-              if (gameState != null)
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: _buildTurnIndicator(isMyTurn),
-                ),
 
               // 光끼 게이지 및 발동 버튼 (우하단)
               if (gameState != null && !_gwangkkiModeActive)
@@ -2274,21 +2264,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     );
   }
 
-  Widget _buildControlButton({
-    required IconData icon,
-    required VoidCallback onTap,
-    Color color = AppColors.textSecondary,
-  }) {
-    return RetroButton(
-      onPressed: onTap,
-      color: AppColors.woodLight.withValues(alpha: 0.2),
-      width: 44,
-      height: 44,
-      padding: EdgeInsets.zero,
-      child: Icon(icon, color: color, size: 22),
-    );
-  }
-
   /// 光끼 모드 발동 버튼
   Widget _buildGwangkkiActivateButton() {
     return GestureDetector(
@@ -2337,48 +2312,6 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildTurnIndicator(bool isMyTurn) {
-    return AnimatedBuilder(
-      animation: _pulseController,
-      builder: (context, child) {
-        final scale = isMyTurn ? 1.0 + (_pulseController.value * 0.05) : 1.0;
-        return Transform.scale(
-          scale: scale,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: isMyTurn
-                  ? AppColors.primaryLight.withValues(alpha: 0.9)
-                  : AppColors.woodLight.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isMyTurn ? AppColors.primaryLight : AppColors.woodDark.withValues(alpha: 0.5),
-                width: isMyTurn ? 2 : 1,
-              ),
-              boxShadow: isMyTurn
-                  ? [
-                      BoxShadow(
-                        color: AppColors.primaryLight.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Text(
-              isMyTurn ? '내 턴' : '상대 턴',
-              style: TextStyle(
-                color: isMyTurn ? Colors.black : AppColors.textSecondary,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
