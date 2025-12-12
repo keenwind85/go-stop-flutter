@@ -3,6 +3,7 @@ import 'package:lottie/lottie.dart';
 import '../../../models/captured_cards.dart';
 import '../../../models/card_data.dart';
 import '../../../config/constants.dart';
+import 'game_avatar.dart';
 
 /// Top Zone: 상대방 영역 (화면 상단 20%)
 ///
@@ -24,6 +25,10 @@ class OpponentZone extends StatelessWidget {
   /// 턴 타이머 관련
   final int? remainingSeconds;  // 남은 시간 (초)
 
+  /// 아바타 관련
+  final bool isHost;  // 상대방이 호스트인지 여부
+  final AvatarState avatarState;
+
   const OpponentZone({
     super.key,
     this.opponentName,
@@ -36,6 +41,8 @@ class OpponentZone extends StatelessWidget {
     this.hasBomb = false,
     this.coinBalance,
     this.remainingSeconds,
+    this.isHost = false,  // 기본값: 상대방은 게스트
+    this.avatarState = AvatarState.normal,
   });
 
   @override
@@ -297,57 +304,80 @@ class OpponentZone extends StatelessWidget {
 
   /// 획득 패를 실제 카드 이미지로 그룹별 표시
   Widget _buildCapturedCards() {
-    if (captured == null ||
-        (captured!.kwang.isEmpty &&
-            captured!.animal.isEmpty &&
-            captured!.ribbon.isEmpty &&
-            captured!.pi.isEmpty)) {
-      return Center(
-        child: Text(
-          '획득 패 없음',
-          style: TextStyle(
-            color: AppColors.textSecondary.withValues(alpha: 0.5),
-            fontSize: 11,
-          ),
-        ),
-      );
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 획득패 영역 높이에 맞춘 아바타 크기 (패딩 고려)
+        final avatarSize = constraints.maxHeight - 8;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          // 광
-          if (captured!.kwang.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.kwang,
-              label: '광',
-              labelColor: AppColors.cardHighlight,
+        final hasCards = captured != null &&
+            (captured!.kwang.isNotEmpty ||
+                captured!.animal.isNotEmpty ||
+                captured!.ribbon.isNotEmpty ||
+                captured!.pi.isNotEmpty);
+
+        return Row(
+          children: [
+            // 아바타 (획득패 영역 좌측, 세로 크기에 맞춤)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: GameAvatar(
+                isHost: isHost,
+                state: avatarState,
+                size: avatarSize.clamp(40, 80),
+              ),
             ),
-          // 열끗 (동물)
-          if (captured!.animal.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.animal,
-              label: '열',
-              labelColor: AppColors.goRed,
+            // 획득 패 영역
+            Expanded(
+              child: hasCards
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          // 광
+                          if (captured!.kwang.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.kwang,
+                              label: '광',
+                              labelColor: AppColors.cardHighlight,
+                            ),
+                          // 열끗 (동물)
+                          if (captured!.animal.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.animal,
+                              label: '열',
+                              labelColor: AppColors.goRed,
+                            ),
+                          // 띠
+                          if (captured!.ribbon.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.ribbon,
+                              label: '띠',
+                              labelColor: AppColors.stopBlue,
+                            ),
+                          // 피
+                          if (captured!.pi.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.pi,
+                              label: '피',
+                              labelColor: AppColors.primaryLight,
+                              showCount: captured!.piCount,
+                            ),
+                        ],
+                      ),
+                    )
+                  : Center(
+                      child: Text(
+                        '획득 패 없음',
+                        style: TextStyle(
+                          color: AppColors.textSecondary.withValues(alpha: 0.5),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
             ),
-          // 띠
-          if (captured!.ribbon.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.ribbon,
-              label: '띠',
-              labelColor: AppColors.stopBlue,
-            ),
-          // 피
-          if (captured!.pi.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.pi,
-              label: '피',
-              labelColor: AppColors.primaryLight,
-              showCount: captured!.piCount,
-            ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 

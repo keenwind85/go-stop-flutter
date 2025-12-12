@@ -49,13 +49,17 @@ class UserWallet {
 class DailyActions {
   final String? lastAttendance;
   final String? lastDonation;
-  final int rouletteCount;
+  final int rouletteCount;           // 기본 룰렛 사용 횟수 (매일 3회)
+  final int bonusRouletteCount;      // 게임 완료로 얻은 보너스 룰렛 사용 횟수
+  final int bonusRouletteEarned;     // 게임 완료로 얻은 보너스 룰렛 총 횟수
   final String? lastRouletteDate;
 
   const DailyActions({
     this.lastAttendance,
     this.lastDonation,
     this.rouletteCount = 0,
+    this.bonusRouletteCount = 0,
+    this.bonusRouletteEarned = 0,
     this.lastRouletteDate,
   });
 
@@ -63,12 +67,16 @@ class DailyActions {
     String? lastAttendance,
     String? lastDonation,
     int? rouletteCount,
+    int? bonusRouletteCount,
+    int? bonusRouletteEarned,
     String? lastRouletteDate,
   }) {
     return DailyActions(
       lastAttendance: lastAttendance ?? this.lastAttendance,
       lastDonation: lastDonation ?? this.lastDonation,
       rouletteCount: rouletteCount ?? this.rouletteCount,
+      bonusRouletteCount: bonusRouletteCount ?? this.bonusRouletteCount,
+      bonusRouletteEarned: bonusRouletteEarned ?? this.bonusRouletteEarned,
       lastRouletteDate: lastRouletteDate ?? this.lastRouletteDate,
     );
   }
@@ -78,6 +86,8 @@ class DailyActions {
       'last_attendance': lastAttendance,
       'last_donation': lastDonation,
       'roulette_count': rouletteCount,
+      'bonus_roulette_count': bonusRouletteCount,
+      'bonus_roulette_earned': bonusRouletteEarned,
       'last_roulette_date': lastRouletteDate,
     };
   }
@@ -90,6 +100,8 @@ class DailyActions {
       lastAttendance: json['last_attendance'] as String?,
       lastDonation: json['last_donation'] as String?,
       rouletteCount: (json['roulette_count'] as num?)?.toInt() ?? 0,
+      bonusRouletteCount: (json['bonus_roulette_count'] as num?)?.toInt() ?? 0,
+      bonusRouletteEarned: (json['bonus_roulette_earned'] as num?)?.toInt() ?? 0,
       lastRouletteDate: json['last_roulette_date'] as String?,
     );
   }

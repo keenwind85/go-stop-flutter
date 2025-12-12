@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/card_data.dart';
 import '../models/game_room.dart';
 import '../models/captured_cards.dart';
+import '../models/item_data.dart';
 import '../game/systems/deck_generator.dart';
 import '../game/systems/score_calculator.dart';
 import '../config/constants.dart';
@@ -64,6 +65,28 @@ class MatgoLogicService {
   final RoomService _roomService;
 
   MatgoLogicService(this._roomService);
+
+  /// 덱에서 카드를 뽑는 헬퍼 함수 (光의 기운 효과 적용)
+  /// gwangPriorityTurns > 0이면 덱에서 광 카드를 우선 선택
+  static CardData _drawFromDeck(List<CardData> deck, int gwangPriorityTurns) {
+    if (deck.isEmpty) {
+      throw StateError('덱이 비어있습니다');
+    }
+
+    if (gwangPriorityTurns > 0) {
+      // 덱에서 광 카드 찾기
+      final gwangCardIndex = deck.indexWhere(
+        (card) => card.type == CardType.kwang,
+      );
+      if (gwangCardIndex >= 0) {
+        print('[MatgoLogicService] 光의 기운 효과 발동! 광 카드 우선 선택: ${deck[gwangCardIndex].id}');
+        return deck.removeAt(gwangCardIndex);
+      }
+    }
+
+    // 광 카드가 없거나 효과가 없으면 첫 번째 카드 반환
+    return deck.removeAt(0);
+  }
 
   /// 9월 열끗 카드인지 확인 (09month_1.png)
   /// 9월 열끗은 획득 시 열끗/쌍피 선택 가능
@@ -541,6 +564,10 @@ class MatgoLogicService {
         SpecialEvent event = SpecialEvent.none;
         int piToSteal = 0;
 
+        // 光의 기운 아이템 효과 (덱에서 광 카드 우선 선택)
+        final myItemEffects = isPlayer1 ? current.player1ItemEffects : current.player2ItemEffects;
+        final gwangPriorityTurns = myItemEffects?.gwangPriorityTurns ?? 0;
+
         // 바닥에서 같은 월 카드 찾기
         final matchingFloor = floorCards.where((c) => c.month == card.month).toList();
 
@@ -600,7 +627,7 @@ class MatgoLogicService {
         CardData? deckCard;
 
         if (deck.isNotEmpty) {
-          deckCard = deck.removeAt(0);
+          deckCard = _drawFromDeck(deck, gwangPriorityTurns);
 
           // 보너스 카드는 즉시 획득
           if (deckCard.isBonus) {
@@ -608,7 +635,7 @@ class MatgoLogicService {
             deckCard = null;
             // 다시 뒤집기
             if (deck.isNotEmpty) {
-              deckCard = deck.removeAt(0);
+              deckCard = _drawFromDeck(deck, gwangPriorityTurns);
             }
           }
 
@@ -702,6 +729,11 @@ class MatgoLogicService {
                 deckMatchingCards: deckMatching,
                 pendingHandCard: card,
                 pendingHandMatch: handMatchCard,
+                player1ItemEffects: current.player1ItemEffects,
+                player2ItemEffects: current.player2ItemEffects,
+                lastItemUsed: current.lastItemUsed,
+                lastItemUsedBy: current.lastItemUsedBy,
+                lastItemUsedAt: current.lastItemUsedAt,
               );
             } else if (deckMatching.length == 3) {
               // 덱 카드 3장 매칭 (설사)
@@ -732,11 +764,13 @@ class MatgoLogicService {
         }
 
         // 피 뺏기
+        int actualPiStolen = 0;
         for (int i = 0; i < piToSteal; i++) {
           final (newOpponent, stolenPi) = opponentCaptured.removePi();
           if (stolenPi != null) {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
+            actualPiStolen++;
           }
         }
 
@@ -763,6 +797,11 @@ class MatgoLogicService {
             waitingForSeptemberChoice: true,
             septemberChoicePlayer: myUid,
             pendingSeptemberCard: septemberAnimal,
+            player1ItemEffects: current.player1ItemEffects,
+            player2ItemEffects: current.player2ItemEffects,
+            lastItemUsed: current.lastItemUsed,
+            lastItemUsedBy: current.lastItemUsedBy,
+            lastItemUsedAt: current.lastItemUsedAt,
           );
         }
 
@@ -841,6 +880,8 @@ class MatgoLogicService {
           finalScore: finalScore,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
+          piStolenCount: actualPiStolen,
+          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
         );
       },
     );
@@ -894,6 +935,10 @@ class MatgoLogicService {
         SpecialEvent event = SpecialEvent.none;
         int piToSteal = 0;
 
+        // 光의 기운 아이템 효과 (덱에서 광 카드 우선 선택)
+        final myItemEffects = isPlayer1 ? current.player1ItemEffects : current.player2ItemEffects;
+        final gwangPriorityTurns = myItemEffects?.gwangPriorityTurns ?? 0;
+
         // 덱에서 카드 뒤집기
         List<CardData> capture = [];
         CardData? deckCard;
@@ -903,7 +948,7 @@ class MatgoLogicService {
           return current;
         }
 
-        deckCard = deck.removeAt(0);
+        deckCard = _drawFromDeck(deck, gwangPriorityTurns);
 
         // 보너스 카드는 즉시 획득
         if (deckCard.isBonus) {
@@ -911,7 +956,7 @@ class MatgoLogicService {
           deckCard = null;
           // 다시 뒤집기
           if (deck.isNotEmpty) {
-            deckCard = deck.removeAt(0);
+            deckCard = _drawFromDeck(deck, gwangPriorityTurns);
           }
         }
 
@@ -972,11 +1017,13 @@ class MatgoLogicService {
         }
 
         // 피 뺏기
+        int actualPiStolen = 0;
         for (int i = 0; i < piToSteal; i++) {
           final (newOpponent, stolenPi) = opponentCaptured.removePi();
           if (stolenPi != null) {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
+            actualPiStolen++;
           }
         }
 
@@ -1001,6 +1048,11 @@ class MatgoLogicService {
             waitingForSeptemberChoice: true,
             septemberChoicePlayer: myUid,
             pendingSeptemberCard: septemberAnimalFlip,
+            player1ItemEffects: current.player1ItemEffects,
+            player2ItemEffects: current.player2ItemEffects,
+            lastItemUsed: current.lastItemUsed,
+            lastItemUsedBy: current.lastItemUsedBy,
+            lastItemUsedAt: current.lastItemUsedAt,
           );
         }
 
@@ -1082,6 +1134,8 @@ class MatgoLogicService {
           finalScore: finalScore,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
+          piStolenCount: actualPiStolen,
+          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
         );
       },
     );
@@ -1266,11 +1320,13 @@ class MatgoLogicService {
         }
 
         // 피 뺏기
+        int actualPiStolen = 0;
         for (int i = 0; i < piToSteal; i++) {
           final (newOpponent, stolenPi) = opponentCaptured.removePi();
           if (stolenPi != null) {
             opponentCaptured = newOpponent;
             myCaptured = myCaptured.addCard(stolenPi);
+            actualPiStolen++;
           }
         }
 
@@ -1302,6 +1358,11 @@ class MatgoLogicService {
             waitingForSeptemberChoice: true,
             septemberChoicePlayer: myUid,
             pendingSeptemberCard: septemberAnimalDeck,
+            player1ItemEffects: current.player1ItemEffects,
+            player2ItemEffects: current.player2ItemEffects,
+            lastItemUsed: current.lastItemUsed,
+            lastItemUsedBy: current.lastItemUsedBy,
+            lastItemUsedAt: current.lastItemUsedAt,
           );
         }
 
@@ -1384,6 +1445,13 @@ class MatgoLogicService {
           deckMatchingCards: const [],
           pendingHandCard: null,
           pendingHandMatch: null,
+          piStolenCount: actualPiStolen,
+          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
+          player1ItemEffects: current.player1ItemEffects,
+          player2ItemEffects: current.player2ItemEffects,
+          lastItemUsed: current.lastItemUsed,
+          lastItemUsedBy: current.lastItemUsedBy,
+          lastItemUsedAt: current.lastItemUsedAt,
         );
       },
     );
@@ -1572,10 +1640,12 @@ class MatgoLogicService {
         myCaptured = myCaptured.addCard(current.bombTargetCard!);
 
         // 피 1장 뺏기
+        int actualPiStolen = 0;
         final (newOpponent, stolenPi) = opponentCaptured.removePi();
         if (stolenPi != null) {
           opponentCaptured = newOpponent;
           myCaptured = myCaptured.addCard(stolenPi);
+          actualPiStolen = 1;
         }
 
         // 점수 계산
@@ -1583,6 +1653,8 @@ class MatgoLogicService {
         final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
 
         return current.copyWith(
+          piStolenCount: actualPiStolen,
+          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
           player1Hand: isPlayer1 ? myHand : current.player1Hand,
           player2Hand: isPlayer1 ? current.player2Hand : myHand,
           player1Captured: isPlayer1 ? myCaptured : opponentCaptured,

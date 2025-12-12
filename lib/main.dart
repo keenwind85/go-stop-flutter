@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
+import 'services/debug_config_service.dart';
 import 'ui/screens/login_screen.dart';
 import 'ui/screens/lobby_screen.dart';
 
@@ -14,9 +15,16 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Debug Config 초기화
+  final debugConfigService = DebugConfigService();
+  await debugConfigService.initialize();
+
   runApp(
-    const ProviderScope(
-      child: GoStopApp(),
+    ProviderScope(
+      overrides: [
+        debugConfigServiceProvider.overrideWithValue(debugConfigService),
+      ],
+      child: const GoStopApp(),
     ),
   );
 }

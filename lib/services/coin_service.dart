@@ -222,13 +222,13 @@ class CoinService {
 
   // ==================== 코인 룰렛 ====================
 
-  /// 룰렛 돌리기 가능 여부 확인
-  Future<({bool canSpin, int remainingSpins})> canSpinRoulette(String uid) async {
+  /// 룰렛 돌리기 가능 여부 확인 (기본 3회 + 게임 완료 보너스)
+  Future<({bool canSpin, int remainingBase, int remainingBonus, int totalRemaining})> canSpinRoulette(String uid) async {
     final dailyRef = _db.child('users/$uid/daily_actions');
     final snapshot = await dailyRef.get();
 
     if (!snapshot.exists) {
-      return (canSpin: true, remainingSpins: maxDailyRoulette);
+      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: 0, totalRemaining: maxDailyRoulette);
     }
 
     final dailyActions = DailyActions.fromJson(
@@ -240,11 +240,47 @@ class CoinService {
 
     if (!isSameDayRoulette) {
       // 새로운 날이면 카운트 리셋
-      return (canSpin: true, remainingSpins: maxDailyRoulette);
+      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: 0, totalRemaining: maxDailyRoulette);
     }
 
-    final remaining = maxDailyRoulette - dailyActions.rouletteCount;
-    return (canSpin: remaining > 0, remainingSpins: remaining);
+    final remainingBase = maxDailyRoulette - dailyActions.rouletteCount;
+    final remainingBonus = dailyActions.bonusRouletteEarned - dailyActions.bonusRouletteCount;
+    final totalRemaining = remainingBase + remainingBonus;
+    return (canSpin: totalRemaining > 0, remainingBase: remainingBase.clamp(0, maxDailyRoulette), remainingBonus: remainingBonus.clamp(0, 999), totalRemaining: totalRemaining);
+  }
+
+  /// 게임 완료 시 보너스 룰렛 +1 추가
+  Future<void> addBonusRoulette(String uid) async {
+    final today = getTodayString();
+    final dailyRef = _db.child('users/$uid/daily_actions');
+
+    // 트랜잭션으로 안전하게 업데이트
+    await dailyRef.runTransaction((Object? currentData) {
+      DailyActions currentDaily;
+      if (currentData == null) {
+        currentDaily = const DailyActions();
+      } else {
+        currentDaily = DailyActions.fromJson(
+          Map<String, dynamic>.from(currentData as Map),
+        );
+      }
+
+      final isSameDay_ = isSameDay(currentDaily.lastRouletteDate, today);
+
+      // 새로운 날이면 보너스 리셋
+      final newBonusEarned = isSameDay_ ? currentDaily.bonusRouletteEarned + 1 : 1;
+      final newBonusCount = isSameDay_ ? currentDaily.bonusRouletteCount : 0;
+
+      final newDailyActions = currentDaily.copyWith(
+        bonusRouletteEarned: newBonusEarned,
+        bonusRouletteCount: newBonusCount,
+        lastRouletteDate: today,
+      );
+
+      return Transaction.success(newDailyActions.toJson());
+    });
+
+    print('[CoinService] Bonus roulette added for $uid');
   }
 
   /// 룰렛 결과 계산
@@ -258,8 +294,8 @@ class CoinService {
     return 0;
   }
 
-  /// 룰렛 돌리기 실행
-  Future<({bool success, int reward, int newBalance, int remainingSpins, String message})> spinRoulette(String uid) async {
+  /// 룰렛 돌리기 실행 (기본 횟수 먼저 소진, 그 후 보너스 횟수 사용)
+  Future<({bool success, int reward, int newBalance, int remainingBase, int remainingBonus, String message})> spinRoulette(String uid) async {
     final today = getTodayString();
     final userRef = _db.child('users/$uid');
 
@@ -271,7 +307,8 @@ class CoinService {
         success: false,
         reward: 0,
         newBalance: 0,
-        remainingSpins: 0,
+        remainingBase: 0,
+        remainingBonus: 0,
         message: '사용자 정보를 찾을 수 없습니다.',
       );
     }
@@ -283,15 +320,22 @@ class CoinService {
 
     // 오늘 룰렛 횟수 체크
     final isSameDayRoulette = isSameDay(currentDaily.lastRouletteDate, today);
-    final currentCount = isSameDayRoulette ? currentDaily.rouletteCount : 0;
+    final currentBaseCount = isSameDayRoulette ? currentDaily.rouletteCount : 0;
+    final currentBonusCount = isSameDayRoulette ? currentDaily.bonusRouletteCount : 0;
+    final currentBonusEarned = isSameDayRoulette ? currentDaily.bonusRouletteEarned : 0;
 
-    if (currentCount >= maxDailyRoulette) {
+    final remainingBase = maxDailyRoulette - currentBaseCount;
+    final remainingBonus = currentBonusEarned - currentBonusCount;
+    final totalRemaining = remainingBase + remainingBonus;
+
+    if (totalRemaining <= 0) {
       print('[CoinService] Roulette limit reached for $uid');
       return (
         success: false,
         reward: 0,
         newBalance: 0,
-        remainingSpins: 0,
+        remainingBase: 0,
+        remainingBonus: 0,
         message: '오늘의 룰렛 기회를 모두 사용하셨습니다.',
       );
     }
@@ -311,8 +355,20 @@ class CoinService {
           ? currentWallet.totalEarned + reward
           : currentWallet.totalEarned;
 
+      // 기본 횟수 먼저 사용, 기본 횟수가 다 떨어지면 보너스 횟수 사용
+      int newBaseCount = currentBaseCount;
+      int newBonusCount = currentBonusCount;
+      
+      if (remainingBase > 0) {
+        newBaseCount = currentBaseCount + 1;
+      } else {
+        newBonusCount = currentBonusCount + 1;
+      }
+
       final newDailyActions = currentDaily.copyWith(
-        rouletteCount: currentCount + 1,
+        rouletteCount: newBaseCount,
+        bonusRouletteCount: newBonusCount,
+        bonusRouletteEarned: currentBonusEarned,
         lastRouletteDate: today,
       );
       final newWallet = currentWallet.copyWith(
@@ -327,7 +383,8 @@ class CoinService {
 
       await _db.update(updates);
 
-      final remainingSpins = maxDailyRoulette - newDailyActions.rouletteCount;
+      final newRemainingBase = maxDailyRoulette - newDailyActions.rouletteCount;
+      final newRemainingBonus = newDailyActions.bonusRouletteEarned - newDailyActions.bonusRouletteCount;
       final rewardText = reward > 0 ? '+$reward' : (reward < 0 ? '$reward' : '0');
 
       print('[CoinService] Roulette spun for $uid. Reward: $rewardText');
@@ -335,8 +392,9 @@ class CoinService {
         success: true,
         reward: reward,
         newBalance: newWallet.coin,
-        remainingSpins: remainingSpins,
-        message: '룰렛 결과: $rewardText 코인! (남은 횟수: $remainingSpins)',
+        remainingBase: newRemainingBase.clamp(0, maxDailyRoulette),
+        remainingBonus: newRemainingBonus.clamp(0, 999),
+        message: '룰렛 결과: $rewardText 코인!',
       );
     } catch (e) {
       print('[CoinService] Roulette update failed: $e');
@@ -344,7 +402,8 @@ class CoinService {
         success: false,
         reward: 0,
         newBalance: 0,
-        remainingSpins: 0,
+        remainingBase: 0,
+        remainingBonus: 0,
         message: '룰렛 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
       );
     }

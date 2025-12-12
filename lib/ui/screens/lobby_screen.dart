@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
@@ -6,6 +7,7 @@ import '../../config/constants.dart';
 import '../../services/auth_service.dart';
 import '../../services/coin_service.dart';
 import '../../services/room_service.dart';
+import '../../services/debug_config_service.dart';
 import '../../models/game_room.dart';
 import '../../models/user_wallet.dart';
 import '../game/game_screen_new.dart';
@@ -13,6 +15,9 @@ import '../widgets/screen_size_warning_overlay.dart';
 import '../widgets/retro_background.dart';
 import '../widgets/retro_button.dart';
 import '../widgets/gwangkki_gauge.dart';
+import '../widgets/item_shop_dialog.dart';
+import '../../services/item_service.dart';
+import '../../models/item_data.dart';
 
 class LobbyScreen extends ConsumerStatefulWidget {
   const LobbyScreen({super.key});
@@ -34,6 +39,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   void initState() {
     super.initState();
     _cleanupStaleRooms();
+    _checkForLeftGame();  // 나간 게임방 체크
     _attendanceAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
@@ -52,6 +58,157 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   Future<void> _cleanupStaleRooms() async {
     final roomService = ref.read(roomServiceProvider);
     await roomService.cleanupAllStaleRooms();
+  }
+
+  /// 나간 게임방이 있는지 확인하고 복귀 다이얼로그 표시
+  Future<void> _checkForLeftGame() async {
+    final authService = ref.read(authServiceProvider);
+    final roomService = ref.read(roomServiceProvider);
+    final user = authService.currentUser;
+
+    if (user == null) return;
+
+    final leftGame = await roomService.findMyLeftGame(user.uid);
+    if (leftGame != null && mounted) {
+      _showRejoinDialog(leftGame);
+    }
+  }
+
+  /// 게임 복귀 다이얼로그 표시
+  void _showRejoinDialog(GameRoom room) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.woodDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              Icons.sports_esports,
+              color: AppColors.accent,
+              size: 28,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '진행 중인 게임',
+              style: TextStyle(color: AppColors.text),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '아직 끝나지 않은 게임이 있습니다.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.5),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: AppColors.accent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '복귀하지 않으면 자동 플레이로 게임이 진행됩니다.',
+                      style: TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.woodLight,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  '나중에',
+                  style: TextStyle(
+                    color: AppColors.woodDark,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  _rejoinGame(room);
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.primaryLight,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '게임 복귀',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 게임으로 복귀
+  Future<void> _rejoinGame(GameRoom room) async {
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    // 호스트인지 게스트인지 확인
+    final isHost = room.host.uid == user.uid;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => GameScreenNew(
+          roomId: room.roomId,
+          isHost: isHost,
+        ),
+      ),
+    );
   }
 
   Future<void> _createRoom() async {
@@ -241,7 +398,8 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       context: context,
       barrierDismissible: false,
       builder: (context) => _RouletteWheelDialog(
-        initialRemainingSpins: status.remainingSpins,
+        initialRemainingBase: status.remainingBase,
+        initialRemainingBonus: status.remainingBonus,
         canSpin: status.canSpin,
         onSpin: () async {
           final result = await coinService.spinRoulette(user.uid);
@@ -486,7 +644,28 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
 
                   const SizedBox(height: 24),
 
-                  // 방 만들기 버튼
+                  // 아이템 상점 버튼 (5초 롱프레스로 디버그 모드 활성화)
+                  _ItemShopButton(
+                    onTap: () {
+                      final user = ref.read(authServiceProvider).currentUser;
+                      if (user != null) {
+                        final debugConfig = ref.read(debugConfigServiceProvider);
+                        showItemShopDialog(context, user.uid, debugConfig: debugConfig);
+                      }
+                    },
+                    onDebugActivated: () {
+                      final debugConfig = ref.read(debugConfigServiceProvider);
+                      if (debugConfig.isItemShopDebugEnabled) {
+                        debugConfig.activateSessionItemShopDebug();
+                        _showSuccessSnackBar('🔧 아이템 상점 디버그 모드 활성화!');
+                      } else {
+                        _showErrorSnackBar('디버그 모드가 비활성화 상태입니다');
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+
                   // 방 만들기 버튼
                   RetroButton(
                     onPressed: _isLoading ? null : _createRoom,
@@ -804,23 +983,105 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                 color: AppColors.woodLight.withValues(alpha: 0.5),
                 margin: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              // 우측: 光끼 점수 (50%)
+              // 우측: 光끼 점수 + 아이템 (50%)
               Expanded(
                 flex: 1,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: GwangkkiGauge(
-                    score: gwangkkiScore,
-                    showWarning: gwangkkiScore >= 100,
-                    showLabel: true,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 광끼 게이지
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: GwangkkiGauge(
+                        score: gwangkkiScore,
+                        showWarning: gwangkkiScore >= 100,
+                        showLabel: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 아이템 요약
+                    _buildMyItemSummary(user.uid),
+                  ],
                 ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// 내 아이템 요약 위젯
+  Widget _buildMyItemSummary(String uid) {
+    final itemService = ref.read(itemServiceProvider);
+
+    return StreamBuilder<UserInventory>(
+      stream: itemService.getUserInventoryStream(uid),
+      builder: (context, snapshot) {
+        final inventory = snapshot.data ?? const UserInventory();
+        final totalItems = inventory.totalItems;
+
+        return GestureDetector(
+          onTap: () => _showMyItemsDialog(inventory),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.indigo.shade900.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: totalItems > 0 ? Colors.amber.shade400 : Colors.grey,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🎁', style: TextStyle(fontSize: 14)),
+                const SizedBox(width: 4),
+                Text(
+                  '내 아이템',
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: totalItems > 0 ? Colors.amber.shade700 : Colors.grey.shade700,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$totalItems',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textSecondary,
+                  size: 14,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 내 아이템 상세보기 다이얼로그
+  void _showMyItemsDialog(UserInventory inventory) {
+    showDialog(
+      context: context,
+      builder: (context) => _MyItemsDialog(inventory: inventory),
     );
   }
 
@@ -881,17 +1142,22 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       color: AppColors.accent, // Changed to Accent (Yellow/Gold)
       width: null,
       height: 80,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.black, size: 28), // Icon is now Black
+          Icon(icon, color: Colors.black, size: 24), // Icon is now Black
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.black, // Text is now Black
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.black, // Text is now Black
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -1029,14 +1295,16 @@ class _AttendanceAnimationOverlayState
 // ==================== 룰렛 휠 다이얼로그 ====================
 
 class _RouletteWheelDialog extends StatefulWidget {
-  final int initialRemainingSpins;
+  final int initialRemainingBase;   // 기본 남은 횟수 (매일 3회)
+  final int initialRemainingBonus;  // 보너스 남은 횟수 (게임 완료로 획득)
   final bool canSpin;
   final Future<
     ({
       bool success,
       int reward,
       int newBalance,
-      int remainingSpins,
+      int remainingBase,
+      int remainingBonus,
       String message,
     })
   >
@@ -1044,7 +1312,8 @@ class _RouletteWheelDialog extends StatefulWidget {
   onSpin;
 
   const _RouletteWheelDialog({
-    required this.initialRemainingSpins,
+    required this.initialRemainingBase,
+    required this.initialRemainingBonus,
     required this.canSpin,
     required this.onSpin,
   });
@@ -1059,7 +1328,8 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
   late Animation<double> _spinAnimation;
   bool _isSpinning = false;
   int? _result;
-  int _remainingSpins = 0;
+  int _remainingBase = 0;    // 기본 남은 횟수
+  int _remainingBonus = 0;   // 보너스 남은 횟수
   bool _canSpin = true;
 
   // 룰렛 섹션 정의
@@ -1077,7 +1347,8 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
   @override
   void initState() {
     super.initState();
-    _remainingSpins = widget.initialRemainingSpins;
+    _remainingBase = widget.initialRemainingBase;
+    _remainingBonus = widget.initialRemainingBonus;
     _canSpin = widget.canSpin;
     _spinController = AnimationController(
       vsync: this,
@@ -1087,6 +1358,8 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
     _spinAnimation = Tween<double>(begin: 0, end: 0).animate(_spinController);
   }
 
+  int get _totalRemaining => _remainingBase + _remainingBonus;
+
   @override
   void dispose() {
     _spinController.dispose();
@@ -1094,7 +1367,7 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
   }
 
   Future<void> _spin() async {
-    if (_isSpinning || !_canSpin || _remainingSpins <= 0) return;
+    if (_isSpinning || !_canSpin || _totalRemaining <= 0) return;
 
     setState(() {
       _isSpinning = true;
@@ -1131,8 +1404,9 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
     setState(() {
       _isSpinning = false;
       _result = result.reward;
-      _remainingSpins = result.remainingSpins;
-      _canSpin = result.remainingSpins > 0;
+      _remainingBase = result.remainingBase;
+      _remainingBonus = result.remainingBonus;
+      _canSpin = (_remainingBase + _remainingBonus) > 0;
     });
   }
 
@@ -1189,20 +1463,32 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
               ],
             ),
             const SizedBox(height: 8),
-            // 남은 횟수
+            // 남은 횟수 표시
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.purple.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text(
-                '오늘 남은 횟수: $_remainingSpins회',
-                style: const TextStyle(
-                  color: Colors.purple,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Column(
+                children: [
+                  Text(
+                    '남은 횟수: $_totalRemaining회',
+                    style: const TextStyle(
+                      color: Colors.purple,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '(기본: $_remainingBase / 보너스: $_remainingBonus)',
+                    style: TextStyle(
+                      color: Colors.purple.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
@@ -1229,13 +1515,13 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
                   ),
                   // 중앙 버튼
                   GestureDetector(
-                    onTap: _isSpinning || _remainingSpins <= 0 ? null : _spin,
+                    onTap: _isSpinning || _totalRemaining <= 0 ? null : _spin,
                     child: Container(
                       width: 70,
                       height: 70,
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: _remainingSpins > 0
+                          colors: _totalRemaining > 0
                               ? [Colors.purple, Colors.deepPurple]
                               : [Colors.grey, Colors.grey.shade700],
                           begin: Alignment.topLeft,
@@ -1318,6 +1604,57 @@ class _RouletteWheelDialogState extends State<_RouletteWheelDialog>
                   ],
                 ),
               ),
+            // 안내 텍스트
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.white.withValues(alpha: 0.7),
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '룰렛 이용 안내',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '• 매일 3회 무료 돌리기 가능',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '• 게임 1판 완료 시 +1회 추가 (매일 리셋)',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1701,6 +2038,370 @@ class _QuickAmountButton extends StatelessWidget {
             fontSize: 12,
             fontWeight: FontWeight.bold,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== 아이템 상점 버튼 (롱프레스 디버그 활성화) ====================
+
+class _ItemShopButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final VoidCallback onDebugActivated;
+
+  const _ItemShopButton({
+    required this.onTap,
+    required this.onDebugActivated,
+  });
+
+  @override
+  State<_ItemShopButton> createState() => _ItemShopButtonState();
+}
+
+class _ItemShopButtonState extends State<_ItemShopButton> {
+  Timer? _debugActivationTimer;
+  bool _isLongPressing = false;
+  bool _debugActivated = false;
+  static const _debugActivationDuration = Duration(seconds: 5);
+
+  @override
+  void dispose() {
+    _debugActivationTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    setState(() {
+      _isLongPressing = true;
+      _debugActivated = false;
+    });
+
+    // 5초 후 자동으로 디버그 모드 활성화
+    _debugActivationTimer?.cancel();
+    _debugActivationTimer = Timer(_debugActivationDuration, () {
+      if (_isLongPressing && mounted) {
+        setState(() => _debugActivated = true);
+        widget.onDebugActivated();
+      }
+    });
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    _debugActivationTimer?.cancel();
+    setState(() {
+      _isLongPressing = false;
+    });
+  }
+
+  void _onLongPressCancel() {
+    _debugActivationTimer?.cancel();
+    setState(() {
+      _isLongPressing = false;
+      _debugActivated = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      onLongPressStart: _onLongPressStart,
+      onLongPressEnd: _onLongPressEnd,
+      onLongPressCancel: _onLongPressCancel,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: double.infinity,
+        height: 50,
+        decoration: BoxDecoration(
+          color: _debugActivated
+              ? Colors.green.shade700
+              : _isLongPressing
+                  ? Colors.deepPurple.shade700
+                  : Colors.indigo.shade700,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _debugActivated
+                ? Colors.greenAccent
+                : _isLongPressing
+                    ? Colors.amber
+                    : Colors.indigo.shade400,
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 0,
+              offset: const Offset(3, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _debugActivated ? '✅' : _isLongPressing ? '🔧' : '🎁',
+              style: const TextStyle(fontSize: 20),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _debugActivated
+                  ? '디버그 모드 활성화됨!'
+                  : _isLongPressing
+                      ? '디버그 모드 활성화 중...'
+                      : '아이템 상점',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: _debugActivated ? Colors.greenAccent : AppColors.text,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 내 아이템 상세보기 다이얼로그
+class _MyItemsDialog extends StatelessWidget {
+  final UserInventory inventory;
+
+  const _MyItemsDialog({required this.inventory});
+
+  @override
+  Widget build(BuildContext context) {
+    final ownedItems = inventory.items.entries
+        .where((e) => e.value > 0)
+        .toList();
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppColors.woodDark,
+              AppColors.woodDark.withValues(alpha: 0.95),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.woodLight, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 헤더
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.indigo.shade900.withValues(alpha: 0.5),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+              ),
+              child: Row(
+                children: [
+                  const Text('🎁', style: TextStyle(fontSize: 24)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '내 아이템',
+                      style: TextStyle(
+                        color: Colors.amber.shade400,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade700,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '총 ${inventory.totalItems}개',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(color: AppColors.woodLight, height: 1),
+
+            // 아이템 목록
+            if (ownedItems.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  children: [
+                    const Text(
+                      '😢',
+                      style: TextStyle(fontSize: 48),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '보유 중인 아이템이 없습니다',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '아이템 상점에서 구매해보세요!',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: ownedItems.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final entry = ownedItems[index];
+                    final itemData = ItemData.getItem(entry.key);
+                    final count = entry.value;
+
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo.shade900.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.indigo.shade400.withValues(alpha: 0.5),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 아이콘
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.indigo.shade800,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Text(
+                                itemData.iconEmoji,
+                                style: const TextStyle(fontSize: 28),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // 정보
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      itemData.name,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.shade700,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        'x$count',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  itemData.shortDesc,
+                                  style: TextStyle(
+                                    color: Colors.amber.shade300,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  itemData.description,
+                                  style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+            // 닫기 버튼
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.woodLight,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    '닫기',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

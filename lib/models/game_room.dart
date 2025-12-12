@@ -1,6 +1,7 @@
 import 'card_data.dart';
 import 'player_info.dart';
 import 'captured_cards.dart';
+import 'item_data.dart';
 
 /// 방 상태
 enum RoomState {
@@ -178,6 +179,19 @@ class GameState {
   final String? septemberChoicePlayer;    // 선택해야 할 플레이어 uid
   final CardData? pendingSeptemberCard;   // 선택 대기 중인 9월 열끗 카드
 
+  // 피 뺏김 알림 (특수룰로 인한 피 뺏김)
+  final int piStolenCount;                // 뺏긴 피 개수
+  final String? piStolenFromPlayer;       // 피를 뺏긴 플레이어 uid
+
+  // 아이템 효과 관련
+  final ItemEffects? player1ItemEffects;  // 플레이어1 아이템 효과
+  final ItemEffects? player2ItemEffects;  // 플레이어2 아이템 효과
+  final String? lastItemUsed;             // 마지막 사용된 아이템 이름
+  final String? lastItemUsedBy;           // 마지막 아이템 사용자 uid
+  final int? lastItemUsedAt;              // 마지막 아이템 사용 시간 (타임스탬프, 동기화용)
+  final String? player1Uid;               // 플레이어1 uid (아이템 사용 조건 체크용)
+  final String? player2Uid;               // 플레이어2 uid (아이템 사용 조건 체크용)
+
   const GameState({
     required this.turn,
     this.deck = const [],
@@ -216,6 +230,15 @@ class GameState {
     this.waitingForSeptemberChoice = false,
     this.septemberChoicePlayer,
     this.pendingSeptemberCard,
+    this.piStolenCount = 0,
+    this.piStolenFromPlayer,
+    this.player1ItemEffects,
+    this.player2ItemEffects,
+    this.lastItemUsed,
+    this.lastItemUsedBy,
+    this.lastItemUsedAt,
+    this.player1Uid,
+    this.player2Uid,
   });
 
   Map<String, dynamic> toJson() {
@@ -257,6 +280,15 @@ class GameState {
       'waitingForSeptemberChoice': waitingForSeptemberChoice,
       'septemberChoicePlayer': septemberChoicePlayer,
       'pendingSeptemberCard': pendingSeptemberCard?.toJson(),
+      'piStolenCount': piStolenCount,
+      'piStolenFromPlayer': piStolenFromPlayer,
+      'player1ItemEffects': player1ItemEffects?.toJson(),
+      'player2ItemEffects': player2ItemEffects?.toJson(),
+      'lastItemUsed': lastItemUsed,
+      'lastItemUsedBy': lastItemUsedBy,
+      'lastItemUsedAt': lastItemUsedAt,
+      'player1Uid': player1Uid,
+      'player2Uid': player2Uid,
     };
   }
 
@@ -327,6 +359,19 @@ class GameState {
       pendingSeptemberCard: json['pendingSeptemberCard'] != null
           ? CardData.fromJson(Map<String, dynamic>.from(json['pendingSeptemberCard'] as Map))
           : null,
+      piStolenCount: json['piStolenCount'] as int? ?? 0,
+      piStolenFromPlayer: json['piStolenFromPlayer'] as String?,
+      player1ItemEffects: json['player1ItemEffects'] != null
+          ? ItemEffects.fromJson(Map<String, dynamic>.from(json['player1ItemEffects'] as Map))
+          : null,
+      player2ItemEffects: json['player2ItemEffects'] != null
+          ? ItemEffects.fromJson(Map<String, dynamic>.from(json['player2ItemEffects'] as Map))
+          : null,
+      lastItemUsed: json['lastItemUsed'] as String?,
+      lastItemUsedBy: json['lastItemUsedBy'] as String?,
+      lastItemUsedAt: json['lastItemUsedAt'] as int?,
+      player1Uid: json['player1Uid'] as String?,
+      player2Uid: json['player2Uid'] as String?,
     );
   }
 
@@ -375,7 +420,17 @@ class GameState {
     bool? waitingForSeptemberChoice,
     String? septemberChoicePlayer,
     CardData? pendingSeptemberCard,
+    int? piStolenCount,
+    String? piStolenFromPlayer,
+    ItemEffects? player1ItemEffects,
+    ItemEffects? player2ItemEffects,
+    String? lastItemUsed,
+    String? lastItemUsedBy,
+    int? lastItemUsedAt,
+    String? player1Uid,
+    String? player2Uid,
     bool clearLastEventPlayer = false,
+    bool clearPiStolenFromPlayer = false,
     bool clearPukOwner = false,
     bool clearWinner = false,
     bool clearGoStopPlayer = false,
@@ -391,6 +446,8 @@ class GameState {
     bool clearBombTargetCard = false,
     bool clearSeptemberChoicePlayer = false,
     bool clearPendingSeptemberCard = false,
+    bool clearLastItemUsed = false,
+    bool clearLastItemUsedBy = false,
   }) {
     return GameState(
       turn: turn ?? this.turn,
@@ -430,8 +487,20 @@ class GameState {
       waitingForSeptemberChoice: waitingForSeptemberChoice ?? this.waitingForSeptemberChoice,
       septemberChoicePlayer: clearSeptemberChoicePlayer ? null : (septemberChoicePlayer ?? this.septemberChoicePlayer),
       pendingSeptemberCard: clearPendingSeptemberCard ? null : (pendingSeptemberCard ?? this.pendingSeptemberCard),
+      piStolenCount: piStolenCount ?? this.piStolenCount,
+      piStolenFromPlayer: clearPiStolenFromPlayer ? null : (piStolenFromPlayer ?? this.piStolenFromPlayer),
+      player1ItemEffects: player1ItemEffects ?? this.player1ItemEffects,
+      player2ItemEffects: player2ItemEffects ?? this.player2ItemEffects,
+      lastItemUsed: clearLastItemUsed ? null : (lastItemUsed ?? this.lastItemUsed),
+      lastItemUsedBy: clearLastItemUsedBy ? null : (lastItemUsedBy ?? this.lastItemUsedBy),
+      lastItemUsedAt: clearLastItemUsed ? null : (lastItemUsedAt ?? this.lastItemUsedAt),
+      player1Uid: player1Uid ?? this.player1Uid,
+      player2Uid: player2Uid ?? this.player2Uid,
     );
   }
+
+  /// 바닥 카드 가져오기 (getter)
+  List<CardData> get floor => floorCards;
 }
 
 /// 게임 방 전체 데이터 모델
@@ -448,6 +517,8 @@ class GameRoom {
   final String? gwangkkiActivator;  // 光끼 모드 발동자 UID
   final int gameCount;              // 게임 횟수 (첫 게임=0, 재대결=1,2,3...)
   final String? lastWinner;         // 마지막 게임 승자 UID (재대결 시 선공 결정용)
+  final String? leftPlayer;         // 게임 중 나간 플레이어 UID
+  final int? leftAt;                // 나간 시간 (timestamp)
 
   const GameRoom({
     required this.roomId,
@@ -462,6 +533,8 @@ class GameRoom {
     this.gwangkkiActivator,
     this.gameCount = 0,
     this.lastWinner,
+    this.leftPlayer,
+    this.leftAt,
   });
 
   /// 양쪽 모두 재대결 요청했는지
@@ -497,6 +570,8 @@ class GameRoom {
       'gwangkkiActivator': gwangkkiActivator,
       'gameCount': gameCount,
       'lastWinner': lastWinner,
+      'leftPlayer': leftPlayer,
+      'leftAt': leftAt,
     };
   }
 
@@ -527,6 +602,8 @@ class GameRoom {
       gwangkkiActivator: json['gwangkkiActivator'] as String?,
       gameCount: json['gameCount'] as int? ?? 0,
       lastWinner: json['lastWinner'] as String?,
+      leftPlayer: json['leftPlayer'] as String?,
+      leftAt: json['leftAt'] as int?,
     );
   }
 
@@ -543,10 +620,13 @@ class GameRoom {
     String? gwangkkiActivator,
     int? gameCount,
     String? lastWinner,
+    String? leftPlayer,
+    int? leftAt,
     bool clearGuest = false,
     bool clearGameState = false,
     bool clearGwangkkiActivator = false,
     bool clearLastWinner = false,
+    bool clearLeftPlayer = false,
   }) {
     return GameRoom(
       roomId: roomId ?? this.roomId,
@@ -561,6 +641,8 @@ class GameRoom {
       gwangkkiActivator: clearGwangkkiActivator ? null : (gwangkkiActivator ?? this.gwangkkiActivator),
       gameCount: gameCount ?? this.gameCount,
       lastWinner: clearLastWinner ? null : (lastWinner ?? this.lastWinner),
+      leftPlayer: clearLeftPlayer ? null : (leftPlayer ?? this.leftPlayer),
+      leftAt: clearLeftPlayer ? null : (leftAt ?? this.leftAt),
     );
   }
 }

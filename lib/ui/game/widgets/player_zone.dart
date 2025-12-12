@@ -6,6 +6,7 @@ import '../../../models/captured_cards.dart';
 import '../../../models/card_data.dart';
 import '../../../config/constants.dart';
 import 'game_card_widget.dart';
+import 'game_avatar.dart';
 
 /// Bottom Zone: 플레이어 영역 (화면 하단 40%)
 ///
@@ -43,6 +44,10 @@ class PlayerZone extends StatelessWidget {
   final void Function(CardData)? onCardLongPress;  // 디버그: 손패 카드 변경
   final VoidCallback? onDebugModeActivate;         // 디버그: 모드 발동
 
+  /// 아바타 관련
+  final bool isHost;
+  final AvatarState avatarState;
+
   const PlayerZone({
     super.key,
     this.playerName,
@@ -65,6 +70,8 @@ class PlayerZone extends StatelessWidget {
     this.debugModeActive = false,
     this.onCardLongPress,
     this.onDebugModeActivate,
+    this.isHost = true,
+    this.avatarState = AvatarState.normal,
   });
 
   @override
@@ -117,63 +124,86 @@ class PlayerZone extends StatelessWidget {
 
   /// Layer 1: 획득 패를 실제 카드 이미지로 표시
   Widget _buildCapturedSection() {
-    if (captured == null ||
-        (captured!.kwang.isEmpty &&
-            captured!.animal.isEmpty &&
-            captured!.ribbon.isEmpty &&
-            captured!.pi.isEmpty)) {
-      return Center(
-        child: Text(
-          '획득 패 없음',
-          style: TextStyle(
-            color: AppColors.woodLight.withValues(alpha: 0.5),
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      );
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 획득패 영역 높이에 맞춘 아바타 크기 (패딩 고려)
+        final avatarSize = constraints.maxHeight - 8;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      child: Row(
-        children: [
-          // 광 (점수가 나는 패 - 강조)
-          if (captured!.kwang.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.kwang,
-              label: '광',
-              labelColor: AppColors.cardHighlight,
-              isHighlighted: captured!.kwang.length >= 3, // 3광 이상이면 강조
+        final hasCards = captured != null &&
+            (captured!.kwang.isNotEmpty ||
+                captured!.animal.isNotEmpty ||
+                captured!.ribbon.isNotEmpty ||
+                captured!.pi.isNotEmpty);
+
+        return Row(
+          children: [
+            // 아바타 (획득패 영역 좌측, 세로 크기에 맞춤)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: GameAvatar(
+                isHost: isHost,
+                state: avatarState,
+                size: avatarSize.clamp(40, 80),
+              ),
             ),
-          // 열끗 (동물) - 고도리 체크
-          if (captured!.animal.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.animal,
-              label: '열',
-              labelColor: AppColors.goRed,
-              isHighlighted: _hasGodori(), // 고도리면 강조
+            // 획득 패 영역
+            Expanded(
+              child: hasCards
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                      child: Row(
+                        children: [
+                          // 광 (점수가 나는 패 - 강조)
+                          if (captured!.kwang.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.kwang,
+                              label: '광',
+                              labelColor: AppColors.cardHighlight,
+                              isHighlighted: captured!.kwang.length >= 3,
+                            ),
+                          // 열끗 (동물) - 고도리 체크
+                          if (captured!.animal.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.animal,
+                              label: '열',
+                              labelColor: AppColors.goRed,
+                              isHighlighted: _hasGodori(),
+                            ),
+                          // 띠 - 홍단/청단/초단 체크
+                          if (captured!.ribbon.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.ribbon,
+                              label: '띠',
+                              labelColor: AppColors.stopBlue,
+                              isHighlighted: captured!.ribbon.length >= 5,
+                            ),
+                          // 피
+                          if (captured!.pi.isNotEmpty)
+                            _buildCardGroup(
+                              cards: captured!.pi,
+                              label: '피',
+                              labelColor: AppColors.primaryLight,
+                              showCount: captured!.piCount,
+                              isHighlighted: captured!.piCount >= 10,
+                            ),
+                        ],
+                      ),
+                    )
+                  : Center(
+                      child: Text(
+                        '획득 패 없음',
+                        style: TextStyle(
+                          color: AppColors.woodLight.withValues(alpha: 0.5),
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
             ),
-          // 띠 - 홍단/청단/초단 체크
-          if (captured!.ribbon.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.ribbon,
-              label: '띠',
-              labelColor: AppColors.stopBlue,
-              isHighlighted: captured!.ribbon.length >= 5, // 5띠 이상이면 강조
-            ),
-          // 피
-          if (captured!.pi.isNotEmpty)
-            _buildCardGroup(
-              cards: captured!.pi,
-              label: '피',
-              labelColor: AppColors.primaryLight,
-              showCount: captured!.piCount,
-              isHighlighted: captured!.piCount >= 10, // 10피 이상이면 강조
-            ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 

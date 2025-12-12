@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lottie/lottie.dart';
 import '../../models/card_data.dart';
 import '../../models/game_room.dart';
+import '../../models/item_data.dart';
 import '../../models/user_wallet.dart';
 import '../../services/auth_service.dart';
 import '../../services/room_service.dart';
 import '../../services/matgo_logic_service.dart';
 import '../../services/sound_service.dart';
 import '../../services/coin_service.dart';
+import '../../services/debug_config_service.dart';
 import '../../game/systems/score_calculator.dart';
 import '../widgets/game_result_dialog.dart';
 import '../widgets/special_event_overlay.dart';
@@ -25,6 +27,7 @@ import '../screens/lobby_screen.dart';
 import 'widgets/opponent_zone.dart';
 import 'widgets/floor_zone.dart';
 import 'widgets/player_zone.dart';
+import 'widgets/game_avatar.dart';
 import 'animations/animations.dart';
 import '../widgets/screen_size_warning_overlay.dart';
 import '../widgets/retro_background.dart';
@@ -32,6 +35,8 @@ import '../widgets/retro_button.dart';
 import '../widgets/gwangkki_gauge.dart';
 import '../widgets/first_turn_overlay.dart';
 import '../widgets/debug_card_selector_dialog.dart';
+import '../widgets/item_use_button.dart';
+import '../widgets/item_use_overlay.dart';
 import '../../config/constants.dart';
 
 /// 디자인 가이드 기반 색상
@@ -72,6 +77,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   // 게임 결과 코인 정산 정보
   int? _coinTransferAmount;
   bool _coinSettlementDone = false;
+  bool _bonusRouletteAdded = false;  // 보너스 룰렛 추가 완료 플래그
 
   // UI 상태
   SpecialEvent _lastShownEvent = SpecialEvent.none;
@@ -106,6 +112,10 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   CardData? _bonusCardForEffect;
   Offset? _bonusCardStartPosition;
   Offset? _bonusCardEndPosition;
+
+  // 피 빼앗김 알림 상태
+  bool _showingPiStolenNotification = false;
+  int _lastPiStolenCount = 0; // 마지막으로 처리한 피 빼앗김 횟수
 
   // 흔들기 카드 공개 오버레이 상태
   bool _showingShakeCards = false;
@@ -142,10 +152,18 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   double _myGwangkkiScore = 0;
   bool _canActivateGwangkki = false;
 
+  // 아이템 사용 애니메이션 상태 (동기화용)
+  int? _lastShownItemUsedAt;  // 타임스탬프로 새로운 아이템 사용 감지
+  bool _showingItemUseOverlay = false;
+
   // 턴 타이머 상태
   Timer? _turnTimer;
   int _remainingSeconds = 60;
   static const int _turnDuration = 60;  // 60초 턴 제한
+
+  // 상대방 퇴장 자동 플레이 상태
+  Timer? _opponentLeftAutoPlayTimer;
+  bool _processingAutoPlay = false;  // 자동 플레이 중복 실행 방지
 
   // 디버그 모드 상태
   bool _debugModeActive = false;
@@ -195,12 +213,38 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
 
     _listenToRoom();
     _listenToCoins();
+
+    // 아바타 SVG 프리로딩 (게임 시작 시 미리 로드)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AvatarPreloader.preloadAll(context);
+    });
+  }
+
+  /// 게임 중 나갔다가 다시 들어온 경우 복귀 처리
+  Future<void> _tryRejoinRoom(RoomService roomService, String? myUid) async {
+    if (myUid == null) return;
+
+    try {
+      final rejoined = await roomService.rejoinRoom(
+        roomId: widget.roomId,
+        playerId: myUid,
+      );
+
+      if (rejoined) {
+        debugPrint('[GameScreen] Successfully rejoined room: ${widget.roomId}');
+      }
+    } catch (e) {
+      debugPrint('[GameScreen] Rejoin attempt failed: $e');
+    }
   }
 
   void _listenToRoom() {
     final roomService = ref.read(roomServiceProvider);
     final authService = ref.read(authServiceProvider);
     final myUid = authService.currentUser?.uid;
+
+    // 먼저 복귀 시도 (게임 중 나갔다가 다시 들어온 경우)
+    _tryRejoinRoom(roomService, myUid);
 
     _roomSubscription = roomService.watchRoom(widget.roomId).listen((room) {
       if (room == null) {
@@ -264,6 +308,22 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         }
       }
 
+      // 게임 중 상대방이 나갔는지 확인 (leftPlayer 필드)
+      if (room.state == RoomState.playing &&
+          room.gameState?.endState == GameEndState.none &&
+          room.leftPlayer != null &&
+          room.leftPlayer != myUid) {
+        // 상대방이 나감 → 자동 플레이 트리거
+        _handleOpponentLeftDuringGame(room);
+      }
+
+      // 상대방이 복귀했는지 확인 (이전에 leftPlayer가 있었는데 없어짐)
+      if (previousRoom?.leftPlayer != null && room.leftPlayer == null) {
+        _opponentLeftAutoPlayTimer?.cancel();
+        _opponentLeftAutoPlayTimer = null;
+        debugPrint('[GameScreen] Opponent rejoined, cancelling auto-play timer');
+      }
+
       // 양쪽 모두 재대결 요청 시 게임 재시작
       // 호스트만 startRematch 호출하여 방 상태를 waiting으로 변경
       if (room.bothWantRematch && widget.isHost) {
@@ -316,13 +376,18 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       // 게임 상태 업데이트
       if (room.gameState != null) {
         // 새 게임 시작 감지 (게임이 처음 시작된 경우)
-        // 재대결 후 새 게임이 시작되면 코인 정산 상태 및 재대결 진행 상태 리셋
+        // 재대결 후 새 게임이 시작되면 모든 재대결 관련 상태 완전히 리셋
         if (previousRoom?.gameState == null) {
-          if (_coinSettlementDone || _rematchInProgress) {
-            debugPrint('[GameScreen] New game started, resetting rematch flags');
+          if (_coinSettlementDone || _rematchInProgress || _rematchRequested || _opponentRematchRequested) {
+            debugPrint('[GameScreen] New game started, resetting ALL rematch flags');
+            _cancelRematchTimer();  // 재대결 타이머 확실히 취소
             setState(() {
               _coinSettlementDone = false;
+              _bonusRouletteAdded = false;
               _rematchInProgress = false;
+              _rematchRequested = false;
+              _opponentRematchRequested = false;
+              _rematchCountdown = 15;
             });
           }
         }
@@ -430,6 +495,48 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
             room.gameState!.lastEvent,
             room.gameState!.lastEventPlayer == myUid,
           );
+        }
+
+        // 아이템 사용 애니메이션 동기화: 타임스탬프 기반으로 새로운 사용 감지
+        // (lastEvent와 독립적으로 처리)
+        final lastItem = room.gameState!.lastItemUsed;
+        final lastItemBy = room.gameState!.lastItemUsedBy;
+        final lastItemAt = room.gameState!.lastItemUsedAt;
+        if (lastItem != null &&
+            lastItemBy != null &&
+            lastItemAt != null &&
+            lastItemAt != _lastShownItemUsedAt &&
+            !_showingItemUseOverlay &&
+            mounted) {
+          // 사용자 이름 결정
+          String itemUserName;
+          if (lastItemBy == room.host.uid) {
+            itemUserName = room.host.displayName;
+          } else if (room.guest != null && lastItemBy == room.guest!.uid) {
+            itemUserName = room.guest!.displayName;
+          } else {
+            itemUserName = '알 수 없음';
+          }
+
+          // 아이템 타입 파싱
+          try {
+            final itemType = ItemType.values.firstWhere((e) => e.name == lastItem);
+            setState(() {
+              _lastShownItemUsedAt = lastItemAt;
+              _showingItemUseOverlay = true;
+            });
+            // 오버레이 표시 - mounted 체크 완료됨
+            _showItemUseAnimation(itemUserName, itemType);
+          } catch (_) {
+            // 알 수 없는 아이템 타입 무시
+          }
+        }
+
+        // 피 빼앗김 알림 표시 (내가 피를 빼앗긴 경우)
+        if (room.gameState!.piStolenCount > 0 &&
+            room.gameState!.piStolenFromPlayer == myUid &&
+            !_showingPiStolenNotification) {
+          _showPiStolenNotification(room.gameState!.piStolenCount);
         }
 
         // Go/Stop 다이얼로그 표시
@@ -550,7 +657,16 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   Future<void> _startGame() async {
     if (!widget.isHost || _currentRoom == null) return;
 
-    setState(() => _isGameStarted = true);
+    // 게임 시작 시 재대결 타이머 확실히 취소
+    _cancelRematchTimer();
+    
+    setState(() {
+      _isGameStarted = true;
+      // 재대결 관련 플래그 모두 리셋
+      _rematchRequested = false;
+      _opponentRematchRequested = false;
+      _rematchCountdown = 15;
+    });
 
     try {
       final matgoLogic = ref.read(matgoLogicServiceProvider);
@@ -590,6 +706,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       _previousGameState = null;
       _coinTransferAmount = null;
       _coinSettlementDone = false;
+      _bonusRouletteAdded = false;
       _rematchCountdown = 15;
       _opponentLeftDuringRematch = false;
     });
@@ -1419,6 +1536,39 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     _triggerSpecialRuleLottie(event);
   }
 
+  /// 피 빼앗김 알림 표시
+  void _showPiStolenNotification(int count) {
+    setState(() {
+      _showingPiStolenNotification = true;
+      _lastPiStolenCount = count;
+    });
+
+    // 2초 후 알림 숨김
+    Future.delayed(const Duration(milliseconds: 2000), () {
+      if (mounted) {
+        setState(() {
+          _showingPiStolenNotification = false;
+        });
+      }
+    });
+  }
+
+  /// 아이템 사용 애니메이션 표시 (모든 플레이어에게 동기화)
+  void _showItemUseAnimation(String playerName, ItemType itemType) {
+    showItemUseOverlay(
+      context: context,
+      playerName: playerName,
+      itemType: itemType,
+      onComplete: () {
+        if (mounted) {
+          setState(() {
+            _showingItemUseOverlay = false;
+          });
+        }
+      },
+    );
+  }
+
   /// 특수 룰 발생 시 바닥 카드 위치에 로티 애니메이션 표시
   void _triggerSpecialRuleLottie(SpecialEvent event) {
     // 지원하는 이벤트인지 확인
@@ -1654,6 +1804,24 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       await _settleGameCoins();
     }
 
+    // 게임 완료 시 자신에게 보너스 룰렛 +1 추가
+    // 나가리 포함 모든 게임 종료 시 적용, 중복 추가 방지
+    // 각 플레이어가 자신의 보너스만 추가 (Firebase 권한 제약)
+    if (!_bonusRouletteAdded) {
+      _bonusRouletteAdded = true;
+      final coinService = ref.read(coinServiceProvider);
+      final authService = ref.read(authServiceProvider);
+      final myUid = authService.currentUser?.uid;
+      if (myUid != null) {
+        try {
+          await coinService.addBonusRoulette(myUid);
+          debugPrint('[GameScreen] Bonus roulette added for myself: $myUid');
+        } catch (e) {
+          debugPrint('[GameScreen] Bonus roulette add failed: $e');
+        }
+      }
+    }
+
     setState(() => _showingResult = true);
   }
 
@@ -1751,6 +1919,16 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     final user = authService.currentUser;
     if (user == null) return;
 
+    // 코인 부족 체크 (최소 10코인 필요)
+    final coinService = ref.read(coinServiceProvider);
+    final wallet = await coinService.getUserWallet(user.uid);
+    if (wallet == null || wallet.coin < CoinService.minEntryCoins) {
+      if (mounted) {
+        _showInsufficientCoinsDialog();
+      }
+      return;
+    }
+
     final roomService = ref.read(roomServiceProvider);
     await roomService.voteRematch(
       roomId: widget.roomId,
@@ -1767,6 +1945,37 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     if (!_opponentRematchRequested) {
       _startRematchTimer();
     }
+  }
+
+  /// 코인 부족 시 알림 다이얼로그
+  void _showInsufficientCoinsDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.primaryDark,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          '코인 부족',
+          style: TextStyle(
+            color: AppColors.text,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          '보유 코인이 부족하여 재대결을 할 수 없습니다.',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text(
+              '확인',
+              style: TextStyle(color: AppColors.accent),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _startRematchTimer() {
@@ -1890,6 +2099,101 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   }
 
   // ============ 턴 타이머 관련 메서드 끝 ============
+
+  // ============ 상대방 퇴장 자동 플레이 관련 메서드 ============
+
+  /// 게임 중 상대방이 나갔을 때 처리
+  void _handleOpponentLeftDuringGame(GameRoom room) {
+    if (_processingAutoPlay) return;
+
+    final authService = ref.read(authServiceProvider);
+    final myUid = authService.currentUser?.uid;
+    final gameState = room.gameState;
+
+    if (gameState == null || myUid == null) return;
+
+    // 상대방의 턴인 경우에만 자동 플레이 실행
+    // 내 턴이면 내가 플레이하면 되므로 자동 플레이 불필요
+    final opponentUid = room.leftPlayer;
+    if (gameState.turn != opponentUid) {
+      debugPrint('[GameScreen] Opponent left but it\'s my turn, waiting for my play');
+      return;
+    }
+
+    debugPrint('[GameScreen] Opponent left during game, starting auto-play for opponent');
+
+    // 기존 타이머가 있으면 취소
+    _opponentLeftAutoPlayTimer?.cancel();
+
+    // 3초 후 자동 플레이 실행 (상대방이 복귀할 시간을 주기 위해)
+    _opponentLeftAutoPlayTimer = Timer(const Duration(seconds: 3), () {
+      _executeAutoPlayForLeftOpponent();
+    });
+  }
+
+  /// 나간 상대방 대신 자동 플레이 실행
+  Future<void> _executeAutoPlayForLeftOpponent() async {
+    if (_processingAutoPlay) return;
+
+    final room = _currentRoom;
+    final authService = ref.read(authServiceProvider);
+    final myUid = authService.currentUser?.uid;
+
+    if (room == null || room.gameState == null || myUid == null) return;
+
+    final gameState = room.gameState!;
+    final opponentUid = room.leftPlayer;
+
+    // 게임이 이미 종료되었거나 상대방이 복귀했으면 무시
+    if (gameState.endState != GameEndState.none || opponentUid == null) {
+      debugPrint('[GameScreen] Auto-play cancelled - game ended or opponent rejoined');
+      return;
+    }
+
+    // 상대방의 턴이 아니면 무시
+    if (gameState.turn != opponentUid) {
+      debugPrint('[GameScreen] Auto-play cancelled - not opponent\'s turn');
+      return;
+    }
+
+    _processingAutoPlay = true;
+    debugPrint('[GameScreen] Executing auto-play for left opponent: $opponentUid');
+
+    try {
+      final matgoLogicService = ref.read(matgoLogicServiceProvider);
+      final opponentPlayerNumber = widget.isHost ? 2 : 1;
+
+      // 상대방 대신 자동 플레이 실행
+      await matgoLogicService.autoPlayOnTimeout(
+        roomId: widget.roomId,
+        myUid: opponentUid,  // 나간 상대방의 UID로 실행
+        opponentUid: myUid,  // 나는 상대방의 상대
+        playerNumber: opponentPlayerNumber,
+      );
+
+      // 자동 플레이 후 다시 체크 - 여전히 상대방 턴이면 다시 실행
+      // (Go/Stop 선택 등 추가 동작이 필요할 수 있음)
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final updatedRoom = _currentRoom;
+      if (updatedRoom?.leftPlayer != null &&
+          updatedRoom?.gameState?.turn == opponentUid &&
+          updatedRoom?.gameState?.endState == GameEndState.none) {
+        debugPrint('[GameScreen] Opponent still needs to play, scheduling next auto-play');
+        _opponentLeftAutoPlayTimer = Timer(const Duration(seconds: 2), () {
+          _processingAutoPlay = false;
+          _executeAutoPlayForLeftOpponent();
+        });
+      } else {
+        _processingAutoPlay = false;
+      }
+    } catch (e) {
+      debugPrint('[GameScreen] Auto-play error: $e');
+      _processingAutoPlay = false;
+    }
+  }
+
+  // ============ 상대방 퇴장 자동 플레이 관련 메서드 끝 ============
 
   void _showRematchTimeoutDialog() {
     if (!mounted) return;
@@ -2121,6 +2425,21 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   void _activateDebugMode() {
     if (_debugModeActive) return;
 
+    // Remote Config에서 카드 교체 디버그 허용 여부 확인
+    final debugConfig = ref.read(debugConfigServiceProvider);
+    if (!debugConfig.isCardSwapDebugEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('디버그 모드가 비활성화 상태입니다'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    // 세션 내 카드 교체 디버그 활성화
+    debugConfig.activateSessionCardSwapDebug();
     setState(() => _debugModeActive = true);
 
     // 디버그 모드 발동 알림
@@ -2490,9 +2809,14 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   }
 
   Future<void> _leaveRoom() async {
+    // 게임 진행 중인지 확인
+    final isGameInProgress = _currentRoom?.state == RoomState.playing &&
+        _currentRoom?.gameState?.endState == GameEndState.none;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.woodDark,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -2502,28 +2826,96 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           '게임 나가기',
           style: TextStyle(color: AppColors.text),
         ),
-        content: Text(
-          '정말 게임을 나가시겠습니까?',
-          style: TextStyle(color: AppColors.textSecondary),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '정말 게임을 나가시겠습니까?',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+            // 게임 진행 중 경고 메시지
+            if (isGameInProgress) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.goRed.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppColors.goRed.withValues(alpha: 0.5),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppColors.goRed,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '현재 게임방에서 나가면 자동 플레이가 적용되어 코인을 잃을 수도 있습니다',
+                        style: TextStyle(
+                          color: AppColors.goRed,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
+        actionsAlignment: MainAxisAlignment.center,
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
-          RetroButton(
-            text: '취소',
-            color: AppColors.woodLight,
-            textColor: AppColors.text,
-            onPressed: () => Navigator.of(context).pop(false),
-            width: 80,
-            height: 48,
-            fontSize: 16,
-          ),
-          const SizedBox(width: 8),
-          RetroButton(
-            text: '나가기',
-            color: AppColors.goRed,
-            onPressed: () => Navigator.of(context).pop(true),
-            width: 80,
-            height: 48,
-            fontSize: 16,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.woodLight,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  '취소',
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.goRed,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '나가기',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2555,6 +2947,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     _opponentWalletSubscription?.cancel();
     _rematchTimer?.cancel();
     _turnTimer?.cancel();  // 턴 타이머 정리
+    _opponentLeftAutoPlayTimer?.cancel();  // 상대방 퇴장 자동 플레이 타이머 정리
     _soundService.dispose();
     _pulseController.dispose();
     _cardAnimController.dispose();
@@ -2606,6 +2999,18 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                           : gameState?.scores.player1Bomb ?? false,
                       coinBalance: _opponentCoinBalance,
                       remainingSeconds: !isMyTurn ? _remainingSeconds : null,
+                      // 아바타 상태 (상대방)
+                      isHost: !widget.isHost,  // 상대방이므로 반대
+                      avatarState: determineAvatarState(
+                        isGwangkkiMode: _gwangkkiModeActive,
+                        myScore: widget.isHost
+                            ? gameState?.scores.player2Score ?? 0
+                            : gameState?.scores.player1Score ?? 0,
+                        opponentScore: widget.isHost
+                            ? gameState?.scores.player1Score ?? 0
+                            : gameState?.scores.player2Score ?? 0,
+                        turnCount: calculateTurnCount(gameState?.deck.length ?? 24),
+                      ),
                     ),
                   ),
 
@@ -2716,20 +3121,75 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                           debugModeActive: _debugModeActive,
                           onCardLongPress: _debugChangeHandCard,
                           onDebugModeActivate: _activateDebugMode,
+                          // 아바타 상태 (나)
+                          isHost: widget.isHost,
+                          avatarState: determineAvatarState(
+                            isGwangkkiMode: _gwangkkiModeActive,
+                            myScore: widget.isHost
+                                ? gameState?.scores.player1Score ?? 0
+                                : gameState?.scores.player2Score ?? 0,
+                            opponentScore: widget.isHost
+                                ? gameState?.scores.player2Score ?? 0
+                                : gameState?.scores.player1Score ?? 0,
+                            turnCount: calculateTurnCount(gameState?.deck.length ?? 24),
+                          ),
                         ),
                         if (!isMyTurn)
                           Positioned.fill(
                             child: Container(
                               color: Colors.black.withValues(alpha: 0.5),
-                              child: const Center(
-                                child: Text(
-                                  '상대 턴입니다',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    '상대 턴입니다',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
+                                  // 피 빼앗김 알림
+                                  if (_showingPiStolenNotification)
+                                    TweenAnimationBuilder<double>(
+                                      tween: Tween(begin: 0.0, end: 1.0),
+                                      duration: const Duration(milliseconds: 300),
+                                      builder: (context, value, child) {
+                                        return Opacity(
+                                          opacity: value,
+                                          child: Transform.translate(
+                                            offset: Offset(0, 10 * (1 - value)),
+                                            child: child,
+                                          ),
+                                        );
+                                      },
+                                      child: Container(
+                                        margin: const EdgeInsets.only(top: 12),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withValues(alpha: 0.8),
+                                          borderRadius: BorderRadius.circular(20),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(alpha: 0.5),
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _lastPiStolenCount > 1
+                                              ? '특수룰로 인해 피를 $_lastPiStolenCount장 뺏겼어요 ㅠ'
+                                              : '특수룰로 인해 피를 1장 뺏겼어요 ㅠ',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
@@ -2743,23 +3203,27 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
               Positioned(
                 top: 4,
                 right: 4,
-                child: GestureDetector(
-                  onTap: _leaveRoom,
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: AppColors.goRed.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
-                        width: 1,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _leaveRoom,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: AppColors.goRed.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 1,
+                        ),
                       ),
-                    ),
-                    child: const Icon(
-                      Icons.close,
-                      size: 18,
-                      color: Colors.white,
+                      child: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -2808,6 +3272,29 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                         : gameState.scores.player2Bomb,
                     onShake: _onShake,
                     onBomb: _onBomb,
+                  ),
+                ),
+
+              // 아이템 사용 버튼 (좌하단, 바닥패 영역 좌측)
+              if (gameState != null && myUid != null && _currentRoom?.guest != null)
+                Positioned(
+                  left: 8,
+                  bottom: MediaQuery.of(context).size.height * 0.32 + 8,
+                  child: ItemUseButton(
+                    playerUid: myUid,
+                    opponentUid: widget.isHost
+                        ? _currentRoom!.guest!.uid
+                        : _currentRoom!.host.uid,
+                    playerNumber: widget.isHost ? 1 : 2,
+                    roomId: widget.roomId,
+                    gameState: gameState,
+                    // 내 턴일 때만 아이템 사용 가능
+                    enabled: gameState.turn == myUid,
+                    onItemUsed: (itemType) {
+                      // 애니메이션은 Firebase 동기화를 통해 모든 플레이어에게 동시에 표시됨
+                      // onItemUsed는 아이템 사용 성공 알림용으로만 사용
+                      debugPrint('[ItemUseButton] 아이템 사용 완료: ${itemType.name}');
+                    },
                   ),
                 ),
 
@@ -2887,9 +3374,9 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
               // 光끼 모드 배너 (활성화 중 지속 표시) - 나가기 버튼(높이 28 + top 4) 아래에 배치
               if (_gwangkkiModeActive && !_showingGwangkkiAlert)
                 Positioned(
-                  top: 36,
-                  left: 0,
-                  right: 0,
+                  top: 4,
+                  left: 4,
+                  right: 36,
                   child: GwangkkiModeBanner(
                     activatorName: _gwangkkiActivator == _currentRoom?.host.uid
                         ? _currentRoom?.host.displayName ?? '호스트'
@@ -2971,17 +3458,15 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                   right: 0,
                   bottom: 0,
                   child: IgnorePointer(
-                    child: SizedBox(
-                      height: 80,
-                      child: Lottie.asset(
-                        'assets/etc/Fire-wall.json',
-                        fit: BoxFit.fill,
+                    child: Lottie.asset(
+                        'assets/etc/Fire_wall.json',
+                        fit: BoxFit.fitWidth,
+                        alignment: Alignment.bottomCenter,
                         repeat: true,
                         errorBuilder: (context, error, stackTrace) {
                           return const SizedBox.shrink();
                         },
                       ),
-                    ),
                   ),
                 ),
             ],
@@ -3050,6 +3535,19 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     final goCount = widget.isHost
         ? gameState.scores.player1GoCount
         : gameState.scores.player2GoCount;
+
+    // 아이템 효과 확인 (내 효과 상태)
+    final myEffects = widget.isHost
+        ? gameState.player1ItemEffects
+        : gameState.player2ItemEffects;
+    final forceGoOnly = myEffects?.forceGoOnly ?? false;
+    final forceStopOnly = myEffects?.forceStopOnly ?? false;
+
+    // 光끼 모드가 최우선! 光끼 모드에서는 아이템 효과 무시하고 GO만 가능
+    // GO 버튼 비활성화 조건: forceStopOnly (Stop만 가능 아이템 효과) - 단, 光끼 모드에서는 무시
+    final goDisabled = !_gwangkkiModeActive && forceStopOnly;
+    // STOP 버튼 비활성화 조건: 光끼 모드 또는 forceGoOnly (Go만 가능 아이템 효과)
+    final stopDisabled = _gwangkkiModeActive || forceGoOnly;
 
     return Container(
       color: Colors.black.withValues(alpha: 0.7),
@@ -3123,26 +3621,103 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                   ],
                 ),
               ),
+            // 아이템 효과 경고 (forceGoOnly - 상대방이 "제발 Go만해!" 아이템 사용)
+            if (forceGoOnly && !_gwangkkiModeActive)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF4CAF50), Color(0xFF8BC34A)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF4CAF50).withValues(alpha: 0.5),
+                      blurRadius: 8,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.sports_esports, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      '아이템 효과! GO만 가능',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Icon(Icons.sports_esports, color: Colors.white, size: 20),
+                  ],
+                ),
+              ),
+            // 아이템 효과 경고 (forceStopOnly - 상대방이 "제발 Stop만해!" 아이템 사용)
+            // 단, 光끼 모드에서는 아이템 효과가 무시되므로 경고도 표시하지 않음
+            if (forceStopOnly && !_gwangkkiModeActive)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF2196F3), Color(0xFF03A9F4)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF2196F3).withValues(alpha: 0.5),
+                      blurRadius: 8,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.pan_tool, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      '아이템 효과! STOP만 가능',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Icon(Icons.pan_tool, color: Colors.white, size: 20),
+                  ],
+                ),
+              ),
             // GO / STOP 버튼
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                RetroButton(
-                  text: 'GO',
-                  color: AppColors.goRed,
-                  onPressed: _onGo,
-                  width: 120,
-                  height: 60,
-                  fontSize: 24,
+                // GO 버튼 (forceStopOnly 아이템 효과 시 비활성화)
+                Opacity(
+                  opacity: goDisabled ? 0.4 : 1.0,
+                  child: RetroButton(
+                    text: 'GO',
+                    color: goDisabled ? Colors.grey : AppColors.goRed,
+                    onPressed: goDisabled ? null : _onGo,
+                    width: 120,
+                    height: 60,
+                    fontSize: 24,
+                  ),
                 ),
                 const SizedBox(width: 24),
-                // 光끼 모드에서는 STOP 비활성화
+                // STOP 버튼 (光끼 모드 또는 forceGoOnly 아이템 효과 시 비활성화)
                 Opacity(
-                  opacity: _gwangkkiModeActive ? 0.4 : 1.0,
+                  opacity: stopDisabled ? 0.4 : 1.0,
                   child: RetroButton(
                     text: 'STOP',
-                    color: _gwangkkiModeActive ? Colors.grey : AppColors.stopBlue,
-                    onPressed: _gwangkkiModeActive ? null : _onStop,
+                    color: stopDisabled ? Colors.grey : AppColors.stopBlue,
+                    onPressed: stopDisabled ? null : _onStop,
                     width: 120,
                     height: 60,
                     fontSize: 24,

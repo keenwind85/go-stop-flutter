@@ -275,12 +275,79 @@ class RoomService {
     });
   }
 
+  /// 내가 나간 진행 중인 게임방 찾기 (복귀 가능한 방)
+  Future<GameRoom?> findMyLeftGame(String myUid) async {
+    try {
+      // playing 상태이고 leftPlayer가 나인 방 찾기
+      final snapshot = await _roomsRef
+          .orderByChild('state')
+          .equalTo('playing')
+          .get();
+
+      if (!snapshot.exists) return null;
+
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      for (final entry in data.entries) {
+        try {
+          final roomData = Map<String, dynamic>.from(entry.value as Map);
+          final room = GameRoom.fromJson(roomData);
+
+          // 내가 나간 방이고, 게임이 아직 끝나지 않은 경우
+          if (room.leftPlayer == myUid &&
+              room.gameState?.endState == GameEndState.none) {
+            debugPrint('[RoomService] Found my left game: ${room.roomId}');
+            return room;
+          }
+        } catch (e) {
+          debugPrint('[RoomService] Error parsing room: $e');
+        }
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('[RoomService] Error finding left game: $e');
+      return null;
+    }
+  }
+
   /// 방 나가기
+  /// 게임 중인 경우 leftPlayer를 설정하고, 양쪽 모두 나가면 방 삭제
   Future<void> leaveRoom({
     required String roomId,
     required String playerId,
     required bool isHost,
   }) async {
+    // 먼저 현재 방 상태 확인
+    final snapshot = await _roomsRef.child(roomId).get();
+    if (!snapshot.exists) {
+      debugPrint('[RoomService] Room not found: $roomId');
+      return;
+    }
+
+    final roomData = Map<String, dynamic>.from(snapshot.value as Map);
+    final state = roomData['state'] as String?;
+    final leftPlayer = roomData['leftPlayer'] as String?;
+
+    // 게임 중인 경우 (playing 상태)
+    if (state == 'playing') {
+      // 이미 다른 플레이어가 나간 경우 (두 번째 플레이어 나감)
+      if (leftPlayer != null && leftPlayer != playerId) {
+        // 양쪽 모두 나감 → 방 삭제 (무효 처리)
+        await _roomsRef.child(roomId).remove();
+        debugPrint('[RoomService] Both players left during game, room deleted: $roomId');
+        return;
+      }
+
+      // 첫 번째 플레이어가 나감 → leftPlayer 설정
+      await _roomsRef.child(roomId).update({
+        'leftPlayer': playerId,
+        'leftAt': DateTime.now().millisecondsSinceEpoch,
+      });
+      debugPrint('[RoomService] Player left during game: $playerId (room: $roomId)');
+      return;
+    }
+
+    // 대기 중이거나 게임 종료된 경우 기존 로직
     if (isHost) {
       // 호스트가 나가면 방 삭제
       await _roomsRef.child(roomId).remove();
@@ -291,9 +358,40 @@ class RoomService {
         'guest': null,
         'state': 'waiting',
         'gameState': null,
+        'leftPlayer': null,
+        'leftAt': null,
       });
       debugPrint('[RoomService] Guest left room: $roomId');
     }
+  }
+
+  /// 게임방으로 복귀 (나갔던 플레이어)
+  Future<bool> rejoinRoom({
+    required String roomId,
+    required String playerId,
+  }) async {
+    final snapshot = await _roomsRef.child(roomId).get();
+    if (!snapshot.exists) {
+      debugPrint('[RoomService] Room not found for rejoin: $roomId');
+      return false;
+    }
+
+    final roomData = Map<String, dynamic>.from(snapshot.value as Map);
+    final leftPlayer = roomData['leftPlayer'] as String?;
+    final state = roomData['state'] as String?;
+
+    // 게임이 진행 중이고, 나갔던 플레이어가 복귀하는 경우
+    if (state == 'playing' && leftPlayer == playerId) {
+      await _roomsRef.child(roomId).update({
+        'leftPlayer': null,
+        'leftAt': null,
+      });
+      debugPrint('[RoomService] Player rejoined: $playerId (room: $roomId)');
+      return true;
+    }
+
+    debugPrint('[RoomService] Cannot rejoin - state: $state, leftPlayer: $leftPlayer, playerId: $playerId');
+    return false;
   }
 
   /// 방 삭제

@@ -10,7 +10,17 @@
         "wallet": {
           ".read": "auth != null",
           ".write": "auth != null",
-          ".validate": "newData.hasChildren(['coin']) && newData.child('coin').isNumber() && newData.child('coin').val() >= 0 && (!newData.hasChild('gwangkki_score') || (newData.child('gwangkki_score').isNumber() && newData.child('gwangkki_score').val() >= 0 && newData.child('gwangkki_score').val() <= 100))"
+          ".validate": "newData.hasChildren(['coin']) && newData.child('coin').isNumber() && newData.child('coin').val() >= 0"
+        },
+
+        "items": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid == $uid"
+        },
+
+        "inventory": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid == $uid"
         },
 
         "daily_actions": {
@@ -22,6 +32,18 @@
           ".read": "auth != null",
           ".write": "auth != null && auth.uid == $uid"
         }
+      }
+    },
+
+    "shop": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+
+    "global": {
+      "item_shop": {
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     },
 
