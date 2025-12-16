@@ -36,11 +36,13 @@ class GameEndCheckResult {
   final GameEndState endState;
   final String? winner;
   final int finalScore;
+  final bool isGobak;  // 고박 여부
 
   const GameEndCheckResult({
     this.endState = GameEndState.none,
     this.winner,
     this.finalScore = 0,
+    this.isGobak = false,
   });
 }
 
@@ -144,6 +146,7 @@ class MatgoLogicService {
           endState: GameEndState.gobak,
           winner: opponentUid,
           finalScore: finalResult.finalScore,
+          isGobak: true,
         );
       } else {
         // 상대방 7점 미만 → 내가 자동 승리 (강제 스톱)
@@ -176,6 +179,7 @@ class MatgoLogicService {
           endState: GameEndState.gobak,
           winner: myUid,
           finalScore: finalResult.finalScore,
+          isGobak: true,
         );
       } else {
         // 내가 7점 미만 → 상대방 자동 승리
@@ -878,6 +882,7 @@ class MatgoLogicService {
           endState: endState,
           winner: winner,
           finalScore: finalScore,
+          isGobak: endState != GameEndState.none ? (endState == GameEndState.gobak) : null,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           piStolenCount: actualPiStolen,
@@ -1132,6 +1137,7 @@ class MatgoLogicService {
           endState: endState,
           winner: winner,
           finalScore: finalScore,
+          isGobak: endState != GameEndState.none ? (endState == GameEndState.gobak) : null,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           piStolenCount: actualPiStolen,
@@ -1237,20 +1243,30 @@ class MatgoLogicService {
             ? current.scores.player1Multiplier
             : current.scores.player2Multiplier;
 
+        // 상대방 고 횟수 확인 (고박 체크용)
+        final opponentGoCount = isPlayer1
+            ? current.scores.player2GoCount
+            : current.scores.player1GoCount;
+
+        // 고박 여부: 상대방이 고를 선언한 상태에서 내가 스톱으로 역전 승리
+        final isGobak = opponentGoCount > 0;
+
         // 최종 점수 계산 (새 ScoreCalculator 사용)
         final finalResult = ScoreCalculator.calculateFinalScore(
           myCaptures: myCaptured,
           opponentCaptures: opponentCaptured,
           goCount: goCount,
           playerMultiplier: playerMultiplier,
+          isGobak: isGobak,
         );
 
         return current.copyWith(
           waitingForGoStop: false,
           clearGoStopPlayer: true,
-          endState: GameEndState.win,
+          endState: isGobak ? GameEndState.gobak : GameEndState.win,
           winner: myUid,
           finalScore: finalResult.finalScore,
+          isGobak: isGobak,
         );
       },
     );
@@ -1383,6 +1399,7 @@ class MatgoLogicService {
         GameEndState endState = GameEndState.none;
         String? winner;
         int finalScore = 0;
+        bool isGobak = false;
 
         final myHandEmpty = isPlayer1
             ? current.player1Hand.isEmpty
@@ -1415,6 +1432,7 @@ class MatgoLogicService {
           endState = endResult.endState;
           winner = endResult.winner;
           finalScore = endResult.finalScore;
+          isGobak = endResult.isGobak;
         }
 
         return GameState(
@@ -1437,6 +1455,7 @@ class MatgoLogicService {
           endState: endState,
           winner: winner,
           finalScore: finalScore,
+          isGobak: isGobak,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           waitingForDeckSelection: false,
@@ -1890,6 +1909,7 @@ class MatgoLogicService {
         GameEndState endState = GameEndState.none;
         String? winner;
         int finalScore = 0;
+        bool isGobak = false;
 
         final deck = current.deck;
         final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
@@ -1917,6 +1937,7 @@ class MatgoLogicService {
           endState = endResult.endState;
           winner = endResult.winner;
           finalScore = endResult.finalScore;
+          isGobak = endResult.isGobak;
         }
 
         return current.copyWith(
@@ -1939,6 +1960,7 @@ class MatgoLogicService {
           endState: endState,
           winner: winner,
           finalScore: finalScore,
+          isGobak: isGobak,
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           waitingForSeptemberChoice: false,

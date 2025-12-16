@@ -140,6 +140,7 @@ class GameState {
   final GameEndState endState;          // 게임 종료 상태
   final String? winner;                 // 승자 uid
   final int finalScore;                 // 최종 점수 (배수 적용 후)
+  final bool isGobak;                   // 고박 여부 (상대가 고 선언 후 역전 승리)
 
   // Go/Stop 선택 대기
   final bool waitingForGoStop;          // Go/Stop 선택 대기 중
@@ -208,6 +209,7 @@ class GameState {
     this.endState = GameEndState.none,
     this.winner,
     this.finalScore = 0,
+    this.isGobak = false,
     this.waitingForGoStop = false,
     this.goStopPlayer,
     this.shakeCards = const [],
@@ -258,6 +260,7 @@ class GameState {
       'endState': endState.name,
       'winner': winner,
       'finalScore': finalScore,
+      'isGobak': isGobak,
       'waitingForGoStop': waitingForGoStop,
       'goStopPlayer': goStopPlayer,
       'shakeCards': shakeCards.map((c) => c.toJson()).toList(),
@@ -327,6 +330,7 @@ class GameState {
       ),
       winner: json['winner'] as String?,
       finalScore: json['finalScore'] as int? ?? 0,
+      isGobak: json['isGobak'] as bool? ?? false,
       waitingForGoStop: json['waitingForGoStop'] as bool? ?? false,
       goStopPlayer: json['goStopPlayer'] as String?,
       shakeCards: _parseCardList(json['shakeCards']),
@@ -398,6 +402,7 @@ class GameState {
     GameEndState? endState,
     String? winner,
     int? finalScore,
+    bool? isGobak,
     bool? waitingForGoStop,
     String? goStopPlayer,
     List<CardData>? shakeCards,
@@ -465,6 +470,7 @@ class GameState {
       endState: endState ?? this.endState,
       winner: clearWinner ? null : (winner ?? this.winner),
       finalScore: finalScore ?? this.finalScore,
+      isGobak: isGobak ?? this.isGobak,
       waitingForGoStop: waitingForGoStop ?? this.waitingForGoStop,
       goStopPlayer: clearGoStopPlayer ? null : (goStopPlayer ?? this.goStopPlayer),
       shakeCards: shakeCards ?? this.shakeCards,

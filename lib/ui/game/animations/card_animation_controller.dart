@@ -12,11 +12,19 @@ class CardAnimationController extends ChangeNotifier {
   final List<CardEffectData> _activeEffects = [];
   bool _isDisposed = false;
 
+  // 사운드 콜백들
+  VoidCallback? _onMatchSound;
+  VoidCallback? _onMissSound;
+
   /// 초기화 (TickerProvider 필요)
   void initialize(TickerProvider vsync, {
     VoidCallback? onImpactSound,
     VoidCallback? onSweepSound,
+    VoidCallback? onMatchSound,
+    VoidCallback? onMissSound,
   }) {
+    _onMatchSound = onMatchSound;
+    _onMissSound = onMissSound;
     _animator = CardAnimator(
       vsync: vsync,
       onUpdate: _onAnimationUpdate,
@@ -46,6 +54,7 @@ class CardAnimationController extends ChangeNotifier {
     required CardData card,
     required Offset from,
     required Offset to,
+    bool hasMatch = true, // 바닥에 매칭되는 패가 있는지 여부
   }) async {
     if (_animator == null || _isDisposed) return;
 
@@ -54,6 +63,13 @@ class CardAnimationController extends ChangeNotifier {
       startPosition: from,
       endPosition: to,
     );
+
+    // 매칭 여부에 따라 사운드 재생 (내 플레이 시에만)
+    if (hasMatch) {
+      _onMatchSound?.call();
+    } else {
+      _onMissSound?.call();
+    }
 
     // 착지 이펙트 추가
     _addImpactEffect(to);
@@ -80,6 +96,13 @@ class CardAnimationController extends ChangeNotifier {
       deckPosition: deckPosition,
       endPosition: floorPosition,
     );
+
+    // 매칭 여부에 따라 사운드 재생 (내 플레이 시에만)
+    if (hasNoMatch) {
+      _onMissSound?.call();
+    } else {
+      _onMatchSound?.call();
+    }
 
     // 착지 이펙트 추가 (매칭 없으면 메시지도 표시)
     _addImpactEffect(

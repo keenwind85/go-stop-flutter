@@ -337,6 +337,23 @@ class GameResultDialog extends StatelessWidget {
                       ),
                     ],
 
+                    if (scoreDetail!.isGobak) ...[
+                      const SizedBox(height: 4),
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '고박',
+                            style: TextStyle(color: AppColors.textSecondary),
+                          ),
+                          Text(
+                            'x2',
+                            style: TextStyle(color: AppColors.error),
+                          ),
+                        ],
+                      ),
+                    ],
+
                     if (scoreDetail!.playerMultiplier > 1) ...[
                       const SizedBox(height: 4),
                       Row(

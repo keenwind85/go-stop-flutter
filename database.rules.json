@@ -1,7 +1,7 @@
 {
   "rules": {
     "users": {
-      ".indexOn": ["wallet/coin", "wallet/total_earned", "wallet/gwangkki_score"],
+      ".indexOn": ["wallet/coin", "wallet/total_earned", "wallet/gwangkki_score", "wallet/stored_coin"],
       ".read": "auth != null",
 
       "$uid": {
@@ -10,7 +10,7 @@
         "wallet": {
           ".read": "auth != null",
           ".write": "auth != null",
-          ".validate": "newData.hasChildren(['coin']) && newData.child('coin').isNumber() && newData.child('coin').val() >= 0"
+          ".validate": "newData.hasChildren(['coin']) && newData.child('coin').isNumber() && newData.child('coin').val() >= 0 && (!newData.hasChild('stored_coin') || (newData.child('stored_coin').isNumber() && newData.child('stored_coin').val() >= 0))"
         },
 
         "items": {
@@ -31,6 +31,12 @@
         "profile": {
           ".read": "auth != null",
           ".write": "auth != null && auth.uid == $uid"
+        },
+
+        "settings": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "(!newData.hasChild('custom_nickname') || (newData.child('custom_nickname').isString() && newData.child('custom_nickname').val().length <= 10)) && (!newData.hasChild('sound_enabled') || newData.child('sound_enabled').isBoolean())"
         }
       }
     },

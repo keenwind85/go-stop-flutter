@@ -16,7 +16,12 @@ import '../widgets/retro_background.dart';
 import '../widgets/retro_button.dart';
 import '../widgets/gwangkki_gauge.dart';
 import '../widgets/item_shop_dialog.dart';
+import '../widgets/game_guide_dialog.dart';
+import '../widgets/slot_machine_dialog.dart';
+import '../widgets/coin_storage_dialog.dart';
+import '../widgets/settings_dialog.dart';
 import '../../services/item_service.dart';
+import '../../services/settings_service.dart';
 import '../../models/item_data.dart';
 
 class LobbyScreen extends ConsumerStatefulWidget {
@@ -31,6 +36,10 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   bool _isLoading = false;
   final _roomCodeController = TextEditingController();
 
+  // 커스텀 닉네임 (설정에서 변경한 닉네임)
+  String? _customNickname;
+  StreamSubscription<UserSettings>? _settingsSubscription;
+
   // 출석체크 애니메이션
   AnimationController? _attendanceAnimController;
   OverlayEntry? _attendanceOverlay;
@@ -40,9 +49,72 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
     super.initState();
     _cleanupStaleRooms();
     _checkForLeftGame();  // 나간 게임방 체크
+    _checkAndShowGuide(); // 최초 로그인 시 게임 가이드 표시
+    _subscribeToSettings(); // 사용자 설정 구독 (커스텀 닉네임)
     _attendanceAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
+    );
+  }
+
+  /// 표시할 닉네임 (커스텀 닉네임 우선, 없으면 구글 닉네임)
+  String _getDisplayName(String? googleName) {
+    return _customNickname ?? googleName ?? 'Player';
+  }
+
+  /// 사용자 설정 스트림 구독 (커스텀 닉네임 실시간 반영)
+  void _subscribeToSettings() {
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    final settingsService = ref.read(settingsServiceProvider);
+    _settingsSubscription = settingsService.getUserSettingsStream(user.uid).listen(
+      (settings) {
+        if (mounted) {
+          setState(() {
+            _customNickname = settings.customNickname;
+          });
+        }
+      },
+      onError: (e) {
+        print('[LobbyScreen] Settings stream error: $e');
+      },
+    );
+  }
+
+  /// 최초 로그인 시 게임 가이드 자동 표시
+  Future<void> _checkAndShowGuide() async {
+    // 약간의 딜레이 후 표시 (화면 로딩 완료 대기)
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    final shouldShow = await GameGuideDialog.shouldShowOnFirstLogin(user.uid);
+
+    // 처음 보는 경우 표시
+    if (shouldShow) {
+      _showGameGuide(user.uid);
+    }
+  }
+
+  /// 게임 가이드 다이얼로그 표시
+  void _showGameGuide([String? userId]) {
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    final uid = userId ?? user?.uid;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => GameGuideDialog(
+        showDontShowAgain: true,
+        userId: uid,
+      ),
     );
   }
 
@@ -51,6 +123,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
     _roomCodeController.dispose();
     _attendanceAnimController?.dispose();
     _attendanceOverlay?.remove();
+    _settingsSubscription?.cancel();
     super.dispose();
   }
 
@@ -230,7 +303,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       final roomService = ref.read(roomServiceProvider);
       final room = await roomService.createRoom(
         hostUid: user.uid,
-        hostName: user.displayName ?? 'Player',
+        hostName: _getDisplayName(user.displayName),
       );
 
       if (mounted) {
@@ -267,7 +340,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       final joined = await roomService.joinRoom(
         roomId: room.roomId,
         guestUid: user.uid,
-        guestName: user.displayName ?? 'Player',
+        guestName: _getDisplayName(user.displayName),
       );
 
       if (joined != null && mounted) {
@@ -312,7 +385,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       final joined = await roomService.joinRoom(
         roomId: code,
         guestUid: user.uid,
-        guestName: user.displayName ?? 'Player',
+        guestName: _getDisplayName(user.displayName),
       );
 
       if (joined != null && mounted) {
@@ -405,6 +478,28 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
           final result = await coinService.spinRoulette(user.uid);
           return result;
         },
+      ),
+    );
+  }
+
+  Future<void> _showSlotMachineDialog() async {
+    final authService = ref.read(authServiceProvider);
+    final coinService = ref.read(coinServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    // 현재 코인 잔액 조회
+    final wallet = await coinService.getUserWallet(user.uid);
+    final currentCoin = wallet?.coin ?? 0;
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => SlotMachineDialog(
+        uid: user.uid,
+        initialCoin: currentCoin,
       ),
     );
   }
@@ -608,7 +703,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           title: Text(
-            '안녕하세요, ${user?.displayName ?? "Player"}님',
+            '안녕하세요, ${_getDisplayName(user?.displayName)}님',
             style: const TextStyle(
               color: AppColors.text,
               shadows: [
@@ -621,6 +716,19 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
             ),
           ),
           actions: [
+            // 게임 가이드 버튼
+            IconButton(
+              icon: const Icon(Icons.help_outline, color: AppColors.accent),
+              tooltip: '게임 가이드',
+              onPressed: _showGameGuide,
+            ),
+            // 설정 버튼
+            IconButton(
+              icon: const Icon(Icons.settings, color: AppColors.text),
+              tooltip: '설정',
+              onPressed: _showSettingsDialog,
+            ),
+            // 로그아웃 버튼
             IconButton(
               icon: const Icon(Icons.logout, color: AppColors.text),
               onPressed: () => authService.signOut(),
@@ -893,6 +1001,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       builder: (context, snapshot) {
         final wallet = snapshot.data;
         final coin = wallet?.coin ?? 0;
+        final storedCoin = wallet?.storedCoin ?? 0;
         final totalEarned = wallet?.totalEarned ?? 0;
         final gwangkkiScore = wallet?.gwangkkiScore ?? 0;
 
@@ -918,57 +1027,102 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Lottie.asset(
-                        'assets/etc/Coin.json',
-                        width: 42,
-                        height: 42,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(
-                            Icons.monetization_on,
-                            color: AppColors.accent,
-                            size: 28,
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 6),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.end,
+                          Lottie.asset(
+                            'assets/etc/Coin.json',
+                            width: 42,
+                            height: 42,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Icon(
+                                Icons.monetization_on,
+                                color: AppColors.accent,
+                                size: 28,
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '$coin',
-                                style: const TextStyle(
-                                  color: AppColors.accent,
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  height: 1.0,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    '$coin',
+                                    style: const TextStyle(
+                                      color: AppColors.accent,
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1.0,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Padding(
+                                    padding: EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      '코인',
+                                      style:
+                                          TextStyle(color: AppColors.text, fontSize: 14),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 4),
-                                child: Text(
-                                  '코인',
-                                  style:
-                                      TextStyle(color: AppColors.text, fontSize: 14),
-                                ),
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '총획득: $totalEarned',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.savings,
+                                    color: Colors.cyanAccent.withValues(alpha: 0.7),
+                                    size: 12,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    '보관: $storedCoin',
+                                    style: TextStyle(
+                                      color: Colors.cyanAccent.withValues(alpha: 0.8),
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '총 획득: $totalEarned',
-                            style: TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 11,
-                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // 보관/기부 버튼 Row
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildSmallActionButton(
+                            icon: Icons.savings,
+                            label: '보관',
+                            color: Colors.cyan,
+                            onTap: () => _showCoinStorageDialog(coin, storedCoin),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildSmallActionButton(
+                            icon: Icons.volunteer_activism,
+                            label: '기부',
+                            color: Colors.pink,
+                            onTap: _showDonationDialog,
                           ),
                         ],
                       ),
@@ -979,7 +1133,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
               // 구분선
               Container(
                 width: 1,
-                height: 50,
+                height: 70,
                 color: AppColors.woodLight.withValues(alpha: 0.5),
                 margin: const EdgeInsets.symmetric(horizontal: 12),
               ),
@@ -1086,18 +1240,19 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   }
 
   Widget _buildDailyActionsRow() {
+    // 4분할 한 줄: [출석][룰렛][슬롯][랭킹]
     return Row(
       children: [
-        // 출석 체크
+        // 출석
         Expanded(
           child: _buildActionButton(
             icon: Icons.calendar_today,
-            label: '출석체크',
+            label: '출석',
             color: Colors.green,
             onTap: _checkAttendance,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         // 룰렛
         Expanded(
           child: _buildActionButton(
@@ -1107,17 +1262,17 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
             onTap: _showRouletteDialog,
           ),
         ),
-        const SizedBox(width: 8),
-        // 기부
+        const SizedBox(width: 6),
+        // 슬롯
         Expanded(
           child: _buildActionButton(
-            icon: Icons.volunteer_activism,
-            label: '기부',
-            color: Colors.pink,
-            onTap: _showDonationDialog,
+            icon: Icons.view_column,
+            label: '슬롯',
+            color: Colors.teal,
+            onTap: _showSlotMachineDialog,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         // 랭킹
         Expanded(
           child: _buildActionButton(
@@ -1161,6 +1316,76 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 작은 액션 버튼 (보관/기부용)
+  Widget _buildSmallActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 코인 보관 다이얼로그 표시
+  void _showCoinStorageDialog(int currentCoin, int storedCoin) {
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => CoinStorageDialog(
+        uid: user.uid,
+        currentCoin: currentCoin,
+        storedCoin: storedCoin,
+        onCoinChanged: () {
+          // 코인 변경 시 UI 자동 갱신 (StreamBuilder가 처리)
+        },
+      ),
+    );
+  }
+
+  /// 설정 다이얼로그 표시
+  void _showSettingsDialog() {
+    final authService = ref.read(authServiceProvider);
+    final user = authService.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => SettingsDialog(
+        uid: user.uid,
+        googleDisplayName: user.displayName ?? 'Player',
       ),
     );
   }

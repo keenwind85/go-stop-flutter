@@ -306,8 +306,8 @@ class OpponentZone extends StatelessWidget {
   Widget _buildCapturedCards() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 획득패 영역 높이에 맞춘 아바타 크기 (패딩 고려)
-        final avatarSize = constraints.maxHeight - 8;
+        // 아바타 고정 크기 (플레이어와 동일하게 유지)
+        const double avatarSize = 52;
 
         final hasCards = captured != null &&
             (captured!.kwang.isNotEmpty ||
@@ -323,7 +323,7 @@ class OpponentZone extends StatelessWidget {
               child: GameAvatar(
                 isHost: isHost,
                 state: avatarState,
-                size: avatarSize.clamp(40, 80),
+                size: avatarSize,
               ),
             ),
             // 획득 패 영역

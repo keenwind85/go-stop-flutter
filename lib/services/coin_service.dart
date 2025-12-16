@@ -239,8 +239,9 @@ class CoinService {
     final isSameDayRoulette = isSameDay(dailyActions.lastRouletteDate, today);
 
     if (!isSameDayRoulette) {
-      // 새로운 날이면 카운트 리셋
-      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: 0, totalRemaining: maxDailyRoulette);
+      // 새로운 날: 기본 횟수 리셋, 미사용 보너스는 유지
+      final unusedBonus = (dailyActions.bonusRouletteEarned - dailyActions.bonusRouletteCount).clamp(0, 999);
+      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: unusedBonus, totalRemaining: maxDailyRoulette + unusedBonus);
     }
 
     final remainingBase = maxDailyRoulette - dailyActions.rouletteCount;
@@ -283,6 +284,40 @@ class CoinService {
     print('[CoinService] Bonus roulette added for $uid');
   }
 
+  /// 게임 완료 시 보너스 슬롯머신 +1 추가
+  Future<void> addBonusSlot(String uid) async {
+    final today = getTodayString();
+    final dailyRef = _db.child('users/$uid/daily_actions');
+
+    // 트랜잭션으로 안전하게 업데이트
+    await dailyRef.runTransaction((Object? currentData) {
+      DailyActions currentDaily;
+      if (currentData == null) {
+        currentDaily = const DailyActions();
+      } else {
+        currentDaily = DailyActions.fromJson(
+          Map<String, dynamic>.from(currentData as Map),
+        );
+      }
+
+      final isSameDay_ = isSameDay(currentDaily.lastSlotDate, today);
+
+      // 새로운 날이면 보너스 리셋
+      final newBonusEarned = isSameDay_ ? currentDaily.bonusSlotEarned + 1 : 1;
+      final newBonusCount = isSameDay_ ? currentDaily.bonusSlotCount : 0;
+
+      final newDailyActions = currentDaily.copyWith(
+        bonusSlotEarned: newBonusEarned,
+        bonusSlotCount: newBonusCount,
+        lastSlotDate: today,
+      );
+
+      return Transaction.success(newDailyActions.toJson());
+    });
+
+    print('[CoinService] Bonus slot added for $uid');
+  }
+
   /// 룰렛 결과 계산
   int _calculateRouletteReward() {
     final roll = _random.nextInt(100);
@@ -322,7 +357,11 @@ class CoinService {
     final isSameDayRoulette = isSameDay(currentDaily.lastRouletteDate, today);
     final currentBaseCount = isSameDayRoulette ? currentDaily.rouletteCount : 0;
     final currentBonusCount = isSameDayRoulette ? currentDaily.bonusRouletteCount : 0;
-    final currentBonusEarned = isSameDayRoulette ? currentDaily.bonusRouletteEarned : 0;
+    // 새로운 날: 전날 미사용 보너스를 새로운 획득량으로 전환
+    // 같은 날: 기존 획득량 유지
+    final currentBonusEarned = isSameDayRoulette
+        ? currentDaily.bonusRouletteEarned
+        : (currentDaily.bonusRouletteEarned - currentDaily.bonusRouletteCount).clamp(0, 999);
 
     final remainingBase = maxDailyRoulette - currentBaseCount;
     final remainingBonus = currentBonusEarned - currentBonusCount;
@@ -852,5 +891,201 @@ class CoinService {
     await resetGwangkkiScore(activatorUid);
 
     print('[CoinService] GwangKki mode settled - $winnerUid took $loserCoins coins from $loserUid');
+  }
+
+  // ==================== 코인 보관/출금 시스템 ====================
+
+  /// 보관 수수료 (출금 시 적용)
+  static const double withdrawFeeRate = 0.15; // 15%
+
+  /// 보관 시 최소 보유 코인
+  static const int minCoinAfterDeposit = 10;
+
+  /// 코인 보관 (소유 코인 → 보관 코인)
+  /// - 보관 후 최소 10코인은 소유해야 함
+  Future<({bool success, int newCoin, int newStoredCoin, String message})> depositCoins(
+    String uid,
+    int amount,
+  ) async {
+    if (amount <= 0) {
+      return (
+        success: false,
+        newCoin: 0,
+        newStoredCoin: 0,
+        message: '보관할 금액을 입력해주세요.',
+      );
+    }
+
+    final walletRef = _db.child('users/$uid/wallet');
+    final snapshot = await walletRef.get();
+
+    if (!snapshot.exists) {
+      return (
+        success: false,
+        newCoin: 0,
+        newStoredCoin: 0,
+        message: '지갑 정보를 찾을 수 없습니다.',
+      );
+    }
+
+    final wallet = UserWallet.fromJson(
+      Map<String, dynamic>.from(snapshot.value as Map),
+    );
+
+    // 보관 후 최소 10코인 유지 체크
+    final maxDepositable = wallet.coin - minCoinAfterDeposit;
+    if (maxDepositable < 0) {
+      return (
+        success: false,
+        newCoin: wallet.coin,
+        newStoredCoin: wallet.storedCoin,
+        message: '보유 코인이 부족합니다. (최소 ${minCoinAfterDeposit}코인 유지 필요)',
+      );
+    }
+
+    if (amount > maxDepositable) {
+      return (
+        success: false,
+        newCoin: wallet.coin,
+        newStoredCoin: wallet.storedCoin,
+        message: '최대 ${maxDepositable}코인까지 보관 가능합니다.',
+      );
+    }
+
+    // 트랜잭션으로 안전하게 이동
+    final result = await walletRef.runTransaction((data) {
+      if (data == null) return Transaction.abort();
+
+      final currentWallet = UserWallet.fromJson(Map<String, dynamic>.from(data as Map));
+      final newCoin = currentWallet.coin - amount;
+      final newStoredCoin = currentWallet.storedCoin + amount;
+
+      if (newCoin < minCoinAfterDeposit) {
+        return Transaction.abort();
+      }
+
+      return Transaction.success(
+        currentWallet.copyWith(coin: newCoin, storedCoin: newStoredCoin).toJson(),
+      );
+    });
+
+    if (result.committed && result.snapshot.value != null) {
+      final updatedWallet = UserWallet.fromJson(
+        Map<String, dynamic>.from(result.snapshot.value as Map),
+      );
+      print('[CoinService] Deposited $amount coins for $uid. Coin: ${updatedWallet.coin}, Stored: ${updatedWallet.storedCoin}');
+      return (
+        success: true,
+        newCoin: updatedWallet.coin,
+        newStoredCoin: updatedWallet.storedCoin,
+        message: '$amount 코인이 보관되었습니다.',
+      );
+    }
+
+    return (
+      success: false,
+      newCoin: wallet.coin,
+      newStoredCoin: wallet.storedCoin,
+      message: '보관 처리 중 오류가 발생했습니다.',
+    );
+  }
+
+  /// 코인 출금 (보관 코인 → 소유 코인, 15% 수수료)
+  Future<({bool success, int newCoin, int newStoredCoin, int fee, String message})> withdrawCoins(
+    String uid,
+    int amount,
+  ) async {
+    if (amount <= 0) {
+      return (
+        success: false,
+        newCoin: 0,
+        newStoredCoin: 0,
+        fee: 0,
+        message: '출금할 금액을 입력해주세요.',
+      );
+    }
+
+    final walletRef = _db.child('users/$uid/wallet');
+    final snapshot = await walletRef.get();
+
+    if (!snapshot.exists) {
+      return (
+        success: false,
+        newCoin: 0,
+        newStoredCoin: 0,
+        fee: 0,
+        message: '지갑 정보를 찾을 수 없습니다.',
+      );
+    }
+
+    final wallet = UserWallet.fromJson(
+      Map<String, dynamic>.from(snapshot.value as Map),
+    );
+
+    if (amount > wallet.storedCoin) {
+      return (
+        success: false,
+        newCoin: wallet.coin,
+        newStoredCoin: wallet.storedCoin,
+        fee: 0,
+        message: '보관 코인이 부족합니다. (보유: ${wallet.storedCoin}코인)',
+      );
+    }
+
+    // 15% 수수료 계산
+    final fee = (amount * withdrawFeeRate).ceil();
+    final netAmount = amount - fee;
+
+    // 트랜잭션으로 안전하게 이동
+    final result = await walletRef.runTransaction((data) {
+      if (data == null) return Transaction.abort();
+
+      final currentWallet = UserWallet.fromJson(Map<String, dynamic>.from(data as Map));
+
+      if (amount > currentWallet.storedCoin) {
+        return Transaction.abort();
+      }
+
+      final newStoredCoin = currentWallet.storedCoin - amount;
+      final newCoin = currentWallet.coin + netAmount;
+
+      return Transaction.success(
+        currentWallet.copyWith(coin: newCoin, storedCoin: newStoredCoin).toJson(),
+      );
+    });
+
+    if (result.committed && result.snapshot.value != null) {
+      final updatedWallet = UserWallet.fromJson(
+        Map<String, dynamic>.from(result.snapshot.value as Map),
+      );
+      print('[CoinService] Withdrew $amount coins (fee: $fee) for $uid. Coin: ${updatedWallet.coin}, Stored: ${updatedWallet.storedCoin}');
+      return (
+        success: true,
+        newCoin: updatedWallet.coin,
+        newStoredCoin: updatedWallet.storedCoin,
+        fee: fee,
+        message: '$netAmount 코인이 출금되었습니다. (수수료: $fee)',
+      );
+    }
+
+    return (
+      success: false,
+      newCoin: wallet.coin,
+      newStoredCoin: wallet.storedCoin,
+      fee: 0,
+      message: '출금 처리 중 오류가 발생했습니다.',
+    );
+  }
+
+  /// 보관 가능한 최대 금액 계산
+  int getMaxDepositableAmount(int currentCoin) {
+    return (currentCoin - minCoinAfterDeposit).clamp(0, currentCoin);
+  }
+
+  /// 출금 시 수수료 미리보기
+  ({int fee, int netAmount}) previewWithdrawFee(int amount) {
+    final fee = (amount * withdrawFeeRate).ceil();
+    final netAmount = amount - fee;
+    return (fee: fee, netAmount: netAmount);
   }
 }

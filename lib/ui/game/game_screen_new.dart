@@ -13,6 +13,7 @@ import '../../services/matgo_logic_service.dart';
 import '../../services/sound_service.dart';
 import '../../services/coin_service.dart';
 import '../../services/debug_config_service.dart';
+import '../../services/settings_service.dart';
 import '../../game/systems/score_calculator.dart';
 import '../widgets/game_result_dialog.dart';
 import '../widgets/special_event_overlay.dart';
@@ -78,6 +79,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   int? _coinTransferAmount;
   bool _coinSettlementDone = false;
   bool _bonusRouletteAdded = false;  // 보너스 룰렛 추가 완료 플래그
+  bool _bonusSlotAdded = false;      // 보너스 슬롯 추가 완료 플래그
 
   // UI 상태
   SpecialEvent _lastShownEvent = SpecialEvent.none;
@@ -194,6 +196,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     super.initState();
     _soundService = ref.read(soundServiceProvider);
     _soundService.initialize();
+    _loadUserSoundSetting(); // 사용자 사운드 설정 로드
 
     _pulseController = AnimationController(
       vsync: this,
@@ -206,6 +209,8 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       this,
       onImpactSound: () => _soundService.playCardPlace(),
       onSweepSound: () => _soundService.playSpecialEvent(SpecialEvent.none),
+      onMatchSound: () => _soundService.playTakMatch(),
+      onMissSound: () => _soundService.playTakMiss(),
     );
     _cardAnimController.addListener(() {
       if (mounted) setState(() {});
@@ -235,6 +240,23 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       }
     } catch (e) {
       debugPrint('[GameScreen] Rejoin attempt failed: $e');
+    }
+  }
+
+  /// 사용자 사운드 설정 로드 및 적용
+  Future<void> _loadUserSoundSetting() async {
+    final authService = ref.read(authServiceProvider);
+    final uid = authService.currentUser?.uid;
+    if (uid == null) return;
+
+    final settingsService = ref.read(settingsServiceProvider);
+    final settings = await settingsService.getUserSettings(uid);
+
+    // 사용자 설정에 따라 사운드 상태 적용
+    _soundService.applyUserSetting(settings.soundEnabled);
+
+    if (mounted) {
+      setState(() {}); // UI 갱신 (사운드 아이콘 상태)
     }
   }
 
@@ -378,12 +400,16 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         // 새 게임 시작 감지 (게임이 처음 시작된 경우)
         // 재대결 후 새 게임이 시작되면 모든 재대결 관련 상태 완전히 리셋
         if (previousRoom?.gameState == null) {
+          // 게임 시작 효과음 재생 (양쪽 플레이어 모두)
+          _soundService.playGameStart();
+
           if (_coinSettlementDone || _rematchInProgress || _rematchRequested || _opponentRematchRequested) {
             debugPrint('[GameScreen] New game started, resetting ALL rematch flags');
             _cancelRematchTimer();  // 재대결 타이머 확실히 취소
             setState(() {
               _coinSettlementDone = false;
               _bonusRouletteAdded = false;
+              _bonusSlotAdded = false;
               _rematchInProgress = false;
               _rematchRequested = false;
               _opponentRematchRequested = false;
@@ -707,6 +733,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       _coinTransferAmount = null;
       _coinSettlementDone = false;
       _bonusRouletteAdded = false;
+      _bonusSlotAdded = false;
       _rematchCountdown = 15;
       _opponentLeftDuringRematch = false;
     });
@@ -1411,11 +1438,15 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
       safeAreaTop + screenSize.height * 0.4,
     );
 
+    // 매칭 여부 판단: 바닥에 같은 월 카드가 있으면 매칭
+    final hasMatch = matchingCards.isNotEmpty || floorCard != null;
+
     // 카드 내기 애니메이션 실행 (시나리오 A)
     await _cardAnimController.animatePlayCard(
       card: handCard,
       from: fromPosition,
       to: toPosition,
+      hasMatch: hasMatch,
     );
 
     // 게임 로직 실행
@@ -1555,6 +1586,8 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
 
   /// 아이템 사용 애니메이션 표시 (모든 플레이어에게 동기화)
   void _showItemUseAnimation(String playerName, ItemType itemType) {
+    // 아이템 사용 효과음 재생 (양쪽 플레이어 모두 들림)
+    _soundService.playItemUse();
     showItemUseOverlay(
       context: context,
       playerName: playerName,
@@ -1752,6 +1785,8 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   /// 光끼 모드 알림 표시
   void _showGwangkkiModeAlert() {
     setState(() => _showingGwangkkiAlert = true);
+    // 광끼 모드 발동 효과음 (양쪽 플레이어 모두 들림)
+    _soundService.playGwangkki();
   }
 
   /// 光끼 모드 알림 닫기
@@ -1792,9 +1827,9 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     if (gameState?.endState == GameEndState.nagari) {
       _soundService.playNagari();
     } else if (gameState?.winner == myUid) {
-      _soundService.playWin();
+      _soundService.playWinner();
     } else {
-      _soundService.playLose();
+      _soundService.playLoser();
     }
 
     // 나가리가 아니고 승자가 있으면 코인 정산 처리
@@ -1818,6 +1853,22 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
           debugPrint('[GameScreen] Bonus roulette added for myself: $myUid');
         } catch (e) {
           debugPrint('[GameScreen] Bonus roulette add failed: $e');
+        }
+      }
+    }
+
+    // 게임 완료 시 자신에게 보너스 슬롯머신 +1 추가
+    if (!_bonusSlotAdded) {
+      _bonusSlotAdded = true;
+      final coinService = ref.read(coinServiceProvider);
+      final authService = ref.read(authServiceProvider);
+      final myUid = authService.currentUser?.uid;
+      if (myUid != null) {
+        try {
+          await coinService.addBonusSlot(myUid);
+          debugPrint('[GameScreen] Bonus slot added for myself: $myUid');
+        } catch (e) {
+          debugPrint('[GameScreen] Bonus slot add failed: $e');
         }
       }
     }
@@ -3199,33 +3250,74 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                 ],
               ),
 
-              // 상단 컨트롤 (나가기 버튼만)
+              // 상단 컨트롤 (사운드 토글 + 나가기 버튼)
               Positioned(
                 top: 4,
                 right: 4,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _leaveRoom,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: AppColors.goRed.withValues(alpha: 0.85),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 사운드 토글 버튼
+                    StatefulBuilder(
+                      builder: (context, setLocalState) {
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              _soundService.toggleMute();
+                              setLocalState(() {}); // UI 리빌드
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: _soundService.isMuted
+                                    ? AppColors.woodDark.withValues(alpha: 0.85)
+                                    : AppColors.accent.withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Icon(
+                                _soundService.isMuted ? Icons.volume_off : Icons.volume_up,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    // 나가기 버튼
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _leaveRoom,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          width: 1,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.goRed.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.close,
+                            size: 18,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
-                      child: const Icon(
-                        Icons.close,
-                        size: 18,
-                        color: Colors.white,
-                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
 
@@ -3736,7 +3828,13 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
     final isPlayer1 = widget.isHost;
 
     FinalScoreResult? scoreDetail;
-    if (gameState.endState == GameEndState.win) {
+    // 모든 승리 상태에서 점수 상세 계산 (win, gobak, autoWin, chongtong)
+    final hasWinner = gameState.endState == GameEndState.win ||
+        gameState.endState == GameEndState.gobak ||
+        gameState.endState == GameEndState.autoWin ||
+        gameState.endState == GameEndState.chongtong;
+
+    if (hasWinner && gameState.winner != null) {
       // 승자 기준으로 점수 상세 계산 (패자에게도 보여주기 위해)
       final winnerIsPlayer1 = gameState.winner == _currentRoom?.host.uid;
 
@@ -3759,6 +3857,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
         opponentCaptures: loserCaptured,
         goCount: winnerGoCount,
         playerMultiplier: winnerMultiplier,
+        isGobak: gameState.isGobak,
       );
     }
 

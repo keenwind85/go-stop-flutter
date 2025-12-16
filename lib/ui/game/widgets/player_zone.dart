@@ -126,8 +126,8 @@ class PlayerZone extends StatelessWidget {
   Widget _buildCapturedSection() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 획득패 영역 높이에 맞춘 아바타 크기 (패딩 고려)
-        final avatarSize = constraints.maxHeight - 8;
+        // 아바타 고정 크기 (상대방과 동일하게 유지)
+        const double avatarSize = 52;
 
         final hasCards = captured != null &&
             (captured!.kwang.isNotEmpty ||
@@ -143,7 +143,7 @@ class PlayerZone extends StatelessWidget {
               child: GameAvatar(
                 isHost: isHost,
                 state: avatarState,
-                size: avatarSize.clamp(40, 80),
+                size: avatarSize,
               ),
             ),
             // 획득 패 영역
@@ -778,6 +778,11 @@ class _FanHandLayoutState extends State<_FanHandLayout> {
     // 부채꼴 반지름
     final radius = widget.constraints.maxHeight * 0.8 + 50;
 
+    // 터치 영역 확장을 위한 패딩
+    // 양 끝 카드는 바깥쪽으로만 확장하여 카드 간 겹침 방지
+    const edgeTouchPadding = 20.0; // 양 끝 카드의 바깥쪽 패딩
+    const verticalPadding = 10.0; // 상하 패딩 (모든 카드)
+
     return Stack(
       clipBehavior: Clip.none,
       children: List.generate(widget.cards.length, (index) {
@@ -799,28 +804,45 @@ class _FanHandLayoutState extends State<_FanHandLayout> {
         // GlobalKey 가져오기 (위치 추적용)
         final cardKey = widget.getCardKey?.call(card.id);
 
+        // 양 끝 카드만 바깥쪽으로 터치 패딩 확장 (겹침 방지)
+        final isFirstCard = index == 0;
+        final isLastCard = index == widget.cards.length - 1;
+        final leftPadding = isFirstCard ? edgeTouchPadding : 0.0;
+        final rightPadding = isLastCard ? edgeTouchPadding : 0.0;
+
         return Positioned(
-          left: x,
-          top: y + yOffset,
+          left: x - leftPadding,
+          top: y + yOffset - verticalPadding,
           child: GestureDetector(
+            behavior: HitTestBehavior.opaque, // 투명 영역도 터치 인식
             onTap: () => widget.onCardTap(card),
             onLongPressStart: (_) => _onLongPressStart(card),
             onLongPressEnd: (_) => _onLongPressEnd(),
             onLongPressCancel: _onLongPressEnd,
-            child: Transform.rotate(
-              angle: angle,
-              alignment: Alignment.bottomCenter,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-                child: Container(
-                  key: cardKey,
-                  child: GameCardWidget(
-                    cardData: card,
-                    width: cardWidth,
-                    height: cardHeight,
-                    isSelected: isSelected,
-                    isInteractive: true,
+            child: Container(
+              // 터치 영역 확장: 양 끝은 바깥쪽만, 나머지는 상하만
+              padding: EdgeInsets.only(
+                left: leftPadding,
+                right: rightPadding,
+                top: verticalPadding,
+                bottom: verticalPadding,
+              ),
+              color: Colors.transparent, // 투명하지만 터치 인식
+              child: Transform.rotate(
+                angle: angle,
+                alignment: Alignment.bottomCenter,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: Container(
+                    key: cardKey,
+                    child: GameCardWidget(
+                      cardData: card,
+                      width: cardWidth,
+                      height: cardHeight,
+                      isSelected: isSelected,
+                      isInteractive: true,
+                    ),
                   ),
                 ),
               ),

@@ -572,28 +572,37 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   Widget _buildResultDialog(GameState gameState, String? myUid) {
     final isWinner = gameState.winner == myUid;
     final isPlayer1 = widget.isHost;
+    final player1Uid = widget.isHost ? myUid : widget.room.guestId;
 
-    // 승자의 점수 상세 계산
+    // 승자의 점수 상세 계산 (모든 승리 상태에서 계산: win, gobak, autoWin, chongtong)
     FinalScoreResult? scoreDetail;
-    if (isWinner && gameState.endState == GameEndState.win) {
-      final myCaptured = isPlayer1
+    final hasWinner = gameState.endState == GameEndState.win ||
+        gameState.endState == GameEndState.gobak ||
+        gameState.endState == GameEndState.autoWin ||
+        gameState.endState == GameEndState.chongtong;
+
+    if (hasWinner && gameState.winner != null) {
+      // 승자 기준으로 점수 계산 (패자에게도 상대방 점수 내역으로 표시됨)
+      final winnerIsPlayer1 = gameState.winner == player1Uid;
+      final winnerCaptured = winnerIsPlayer1
           ? gameState.player1Captured
           : gameState.player2Captured;
-      final opponentCaptured = isPlayer1
+      final loserCaptured = winnerIsPlayer1
           ? gameState.player2Captured
           : gameState.player1Captured;
-      final goCount = isPlayer1
+      final winnerGoCount = winnerIsPlayer1
           ? gameState.scores.player1GoCount
           : gameState.scores.player2GoCount;
-      final playerMultiplier = isPlayer1
+      final winnerMultiplier = winnerIsPlayer1
           ? gameState.scores.player1Multiplier
           : gameState.scores.player2Multiplier;
 
       scoreDetail = ScoreCalculator.calculateFinalScore(
-        myCaptures: myCaptured,
-        opponentCaptures: opponentCaptured,
-        goCount: goCount,
-        playerMultiplier: playerMultiplier,
+        myCaptures: winnerCaptured,
+        opponentCaptures: loserCaptured,
+        goCount: winnerGoCount,
+        playerMultiplier: winnerMultiplier,
+        isGobak: gameState.isGobak,
       );
     }
 
