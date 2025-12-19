@@ -422,6 +422,111 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
     }
   }
 
+  /// 방 코드 입력 다이얼로그 표시
+  void _showRoomCodeDialog() {
+    _roomCodeController.clear();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.woodDark,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.woodLight, width: 2),
+        ),
+        title: Row(
+          children: const [
+            Icon(Icons.pin, color: AppColors.accent, size: 24),
+            SizedBox(width: 8),
+            Text(
+              '방 코드 입력',
+              style: TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _roomCodeController,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '4자리 코드',
+                hintStyle: TextStyle(
+                  color: AppColors.textSecondary.withValues(alpha: 0.5),
+                ),
+                filled: true,
+                fillColor: Colors.black.withValues(alpha: 0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.woodLight, width: 2),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.woodLight, width: 2),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.accent, width: 2),
+                ),
+                counterText: '',
+              ),
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 24,
+                letterSpacing: 8,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+              textCapitalization: TextCapitalization.characters,
+              maxLength: 4,
+              onSubmitted: (_) {
+                Navigator.of(context).pop();
+                _joinByCode();
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '친구에게 받은 4자리 방 코드를 입력하세요',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              '취소',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _joinByCode();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              '입장',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showErrorSnackBar(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -791,21 +896,21 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
 
                   const SizedBox(height: 16),
 
-                  // 방 만들기 버튼
+                  // 방 만들기 버튼 (아이템 상점 버튼과 동일한 높이)
                   RetroButton(
                     onPressed: _isLoading ? null : _createRoom,
                     color: AppColors.primary,
                     width: double.infinity,
-                    height: 60,
+                    height: 50,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: const [
-                        Icon(Icons.add, color: AppColors.text),
+                        Icon(Icons.add, color: AppColors.text, size: 20),
                         SizedBox(width: 8),
                         Text(
                           '새 게임 만들기',
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: AppColors.text,
                           ),
@@ -816,77 +921,49 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
 
                   const SizedBox(height: 16),
 
-                  // 방 코드로 입장
+                  // 대기 중인 방 헤더 + 방 코드 입력 버튼
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _roomCodeController,
-                          decoration: InputDecoration(
-                            hintText: '방 코드 입력 (4자리)',
-                            hintStyle: TextStyle(
-                              color: AppColors.textSecondary.withValues(
-                                alpha: 0.5,
-                              ),
-                            ),
-                            filled: true,
-                            fillColor: Colors.black.withValues(alpha: 0.5),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppColors.woodLight,
-                                width: 2,
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppColors.woodLight,
-                                width: 2,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppColors.accent,
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            fontSize: 18,
-                            letterSpacing: 4,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                          textCapitalization: TextCapitalization.characters,
-                          maxLength: 4,
+                      const Text(
+                        '대기 중인 방',
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      RetroButton(
-                        onPressed: _isLoading ? null : _joinByCode,
-                        text: '입장',
-                        color: AppColors.accent,
-                        textColor: Colors.black,
-                        width: 80,
-                        height: 60,
-                        fontSize: 18,
+                      // 방 코드 입력 버튼
+                      GestureDetector(
+                        onTap: _showRoomCodeDialog,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.accent,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Icon(Icons.pin, color: AppColors.accent, size: 14),
+                              SizedBox(width: 4),
+                              Text(
+                                '방 코드 입력',
+                                style: TextStyle(
+                                  color: AppColors.accent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // 대기 중인 방 목록
-                  const Text(
-                    '대기 중인 방',
-                    style: TextStyle(
-                      color: AppColors.text,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
                   ),
                   const SizedBox(height: 8),
 
