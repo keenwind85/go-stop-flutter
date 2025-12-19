@@ -905,7 +905,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: const [
-                        Icon(Icons.add, color: AppColors.text, size: 20),
+                        Text('🎴+', style: TextStyle(fontSize: 20)),
                         SizedBox(width: 8),
                         Text(
                           '새 게임 만들기',
@@ -1034,15 +1034,14 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                                 ],
                               ),
                               child: ListTile(
-                                leading: const Icon(
-                                  Icons.videogame_asset,
-                                  color: AppColors.woodDark,
-                                  size: 32,
+                                leading: const Text(
+                                  '🎮',
+                                  style: TextStyle(fontSize: 28),
                                 ),
                                 title: Row(
                                   children: [
                                     Text(
-                                      '방 코드: ${room.roomId}',
+                                      '방코드: ${room.roomId}',
                                       style: const TextStyle(
                                         color: AppColors.woodDark,
                                         fontWeight: FontWeight.bold,
@@ -1385,7 +1384,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         // 출석
         Expanded(
           child: _buildActionButton(
-            icon: Icons.calendar_today,
+            emoji: '📆',
             label: '출석',
             color: Colors.green,
             onTap: _checkAttendance,
@@ -1395,7 +1394,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         // 룰렛
         Expanded(
           child: _buildActionButton(
-            icon: Icons.casino,
+            emoji: '🎲',
             label: '룰렛',
             color: Colors.purple,
             onTap: _showRouletteDialog,
@@ -1405,7 +1404,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         // 슬롯
         Expanded(
           child: _buildActionButton(
-            icon: Icons.view_column,
+            emoji: '🎰',
             label: '슬롯',
             color: Colors.teal,
             onTap: _showSlotMachineDialog,
@@ -1415,7 +1414,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         // 랭킹
         Expanded(
           child: _buildActionButton(
-            icon: Icons.leaderboard,
+            emoji: '📊',
             label: '랭킹',
             color: Colors.orange,
             onTap: _showLeaderboard,
@@ -1426,7 +1425,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
   }
 
   Widget _buildActionButton({
-    required IconData icon,
+    required String emoji,
     required String label,
     required Color color, // color is now ignored for icon/text color but kept for function signature
     required VoidCallback onTap,
@@ -1441,7 +1440,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.black, size: 24), // Icon is now Black
+          Text(emoji, style: const TextStyle(fontSize: 24)), // Emoji instead of Icon
           const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
