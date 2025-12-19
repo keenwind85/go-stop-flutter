@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_wallet.dart';
+import 'slot_machine_service.dart';
 
 /// CoinService 인스턴스 Provider
 final coinServiceProvider = Provider<CoinService>((ref) {
@@ -239,9 +240,8 @@ class CoinService {
     final isSameDayRoulette = isSameDay(dailyActions.lastRouletteDate, today);
 
     if (!isSameDayRoulette) {
-      // 새로운 날: 기본 횟수 리셋, 미사용 보너스는 유지
-      final unusedBonus = (dailyActions.bonusRouletteEarned - dailyActions.bonusRouletteCount).clamp(0, 999);
-      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: unusedBonus, totalRemaining: maxDailyRoulette + unusedBonus);
+      // 새로운 날: 기본 횟수와 보너스 횟수 모두 리셋
+      return (canSpin: true, remainingBase: maxDailyRoulette, remainingBonus: 0, totalRemaining: maxDailyRoulette);
     }
 
     final remainingBase = maxDailyRoulette - dailyActions.rouletteCount;
@@ -284,10 +284,11 @@ class CoinService {
     print('[CoinService] Bonus roulette added for $uid');
   }
 
-  /// 게임 완료 시 보너스 슬롯머신 +1 추가
+  /// 게임 완료 시 보너스 슬롯머신 추가 (게임당 10회)
   Future<void> addBonusSlot(String uid) async {
     final today = getTodayString();
     final dailyRef = _db.child('users/$uid/daily_actions');
+    final bonusAmount = SlotMachineService.bonusSpinsPerGame;
 
     // 트랜잭션으로 안전하게 업데이트
     await dailyRef.runTransaction((Object? currentData) {
@@ -303,7 +304,7 @@ class CoinService {
       final isSameDay_ = isSameDay(currentDaily.lastSlotDate, today);
 
       // 새로운 날이면 보너스 리셋
-      final newBonusEarned = isSameDay_ ? currentDaily.bonusSlotEarned + 1 : 1;
+      final newBonusEarned = isSameDay_ ? currentDaily.bonusSlotEarned + bonusAmount : bonusAmount;
       final newBonusCount = isSameDay_ ? currentDaily.bonusSlotCount : 0;
 
       final newDailyActions = currentDaily.copyWith(
@@ -357,11 +358,11 @@ class CoinService {
     final isSameDayRoulette = isSameDay(currentDaily.lastRouletteDate, today);
     final currentBaseCount = isSameDayRoulette ? currentDaily.rouletteCount : 0;
     final currentBonusCount = isSameDayRoulette ? currentDaily.bonusRouletteCount : 0;
-    // 새로운 날: 전날 미사용 보너스를 새로운 획득량으로 전환
+    // 새로운 날: 보너스 횟수 0으로 리셋
     // 같은 날: 기존 획득량 유지
     final currentBonusEarned = isSameDayRoulette
         ? currentDaily.bonusRouletteEarned
-        : (currentDaily.bonusRouletteEarned - currentDaily.bonusRouletteCount).clamp(0, 999);
+        : 0;
 
     final remainingBase = maxDailyRoulette - currentBaseCount;
     final remainingBonus = currentBonusEarned - currentBonusCount;
@@ -718,16 +719,27 @@ class CoinService {
     return wallet.coin >= minEntryCoins;
   }
 
-  /// 게임 정산 (승자에게 코인 이전)
-  Future<void> settleGame({
+  /// 맞고 2인 게임 정산 (승자에게 코인 이전)
+  /// 
+  /// 코인 정산 배수 (박 규칙):
+  /// - 광박(상대 광 0장): ×2
+  /// - 피박(상대 피 7장 이하): ×2
+  /// - 고박(패자가 1고+ 상태에서 승자가 1고+로 승리): ×2
+  /// 
+  /// [points]: 승자의 최종 점수 (이미 점수 배수 적용된 값)
+  /// [coinMultiplier]: 코인 정산 배수 (광박/피박/고박 배수 곱)
+  Future<({int actualTransfer, String details})> settleGame({
     required String winnerUid,
     required String loserUid,
     required int points,
-    required int multiplier,
+    required int coinMultiplier,
+    bool isGwangBak = false,
+    bool isPiBak = false,
+    bool isGobak = false,
     bool isAllIn = false,
   }) async {
-    // 이전할 코인 계산
-    int transferAmount = points * multiplier;
+    // 이전할 코인 계산: 점수 × 코인 배수
+    int transferAmount = points * coinMultiplier;
 
     // 올인일 경우 패자의 모든 코인 이전
     if (isAllIn) {
@@ -776,7 +788,145 @@ class CoinService {
     updates['users/$loserUid/wallet'] = newLoserWallet.toJson();
 
     await _db.update(updates);
-    print('[CoinService] Game settled: $winnerUid wins $actualTransfer coins from $loserUid');
+    
+    // 정산 상세 내역 생성
+    final List<String> bakDetails = [];
+    if (isGwangBak) bakDetails.add('광박');
+    if (isPiBak) bakDetails.add('피박');
+    if (isGobak) bakDetails.add('고박');
+    final bakStr = bakDetails.isNotEmpty ? ' (${bakDetails.join(', ')})' : '';
+    
+    print('[CoinService] Game settled: $winnerUid wins $actualTransfer coins from $loserUid$bakStr');
+    
+    return (actualTransfer: actualTransfer, details: bakStr);
+  }
+
+  /// 고스톱 3인 게임 정산 (승자가 2명의 패자에게서 코인 수령)
+  /// 
+  /// 코인 정산 배수 (박 규칙):
+  /// - 광박(상대 광 0장): 해당 패자에게 ×2
+  /// - 피박(상대 피 5장 이하): 해당 패자에게 ×2
+  /// - 고박(고스톱): 마지막 고 선언자가 패배 시 해당 플레이어만 ×2
+  /// 
+  /// [points]: 승자의 최종 점수 (이미 점수 배수 적용된 값)
+  /// [loser1CoinMultiplier], [loser2CoinMultiplier]: 각 패자별 코인 배수
+  /// [loser1IsLastGoDeclarer], [loser2IsLastGoDeclarer]: 마지막 고 선언자 여부 (고박 판정용)
+  /// 
+  /// 반환값: 각 패자별 실제 이전 금액 및 상세 내역
+  Future<({int loser1Transfer, int loser2Transfer, String loser1Details, String loser2Details})> settleGostopGame({
+    required String winnerUid,
+    required String loser1Uid,
+    required String loser2Uid,
+    required int points,
+    bool loser1GwangBak = false,
+    bool loser1PiBak = false,
+    bool loser1IsLastGoDeclarer = false,
+    bool loser2GwangBak = false,
+    bool loser2PiBak = false,
+    bool loser2IsLastGoDeclarer = false,
+  }) async {
+    // 각 패자별 코인 배수 계산
+    int loser1Multiplier = 1;
+    int loser2Multiplier = 1;
+    
+    // 패자1 배수 계산
+    if (loser1GwangBak) loser1Multiplier *= 2;
+    if (loser1PiBak) loser1Multiplier *= 2;
+    if (loser1IsLastGoDeclarer) loser1Multiplier *= 2;  // 고스톱 고박: 마지막 고 선언자만
+    
+    // 패자2 배수 계산
+    if (loser2GwangBak) loser2Multiplier *= 2;
+    if (loser2PiBak) loser2Multiplier *= 2;
+    if (loser2IsLastGoDeclarer) loser2Multiplier *= 2;  // 고스톱 고박: 마지막 고 선언자만
+
+    // 이전할 코인 계산 (각 패자별로 다른 배수 적용)
+    int loser1TransferAmount = points * loser1Multiplier;
+    int loser2TransferAmount = points * loser2Multiplier;
+
+    // 각 패자의 지갑 정보 가져오기
+    final winnerSnapshot = await _db.child('users/$winnerUid/wallet').get();
+    final loser1Snapshot = await _db.child('users/$loser1Uid/wallet').get();
+    final loser2Snapshot = await _db.child('users/$loser2Uid/wallet').get();
+
+    if (!winnerSnapshot.exists) {
+      throw Exception('Winner wallet not found');
+    }
+
+    final winnerWallet = UserWallet.fromJson(
+      Map<String, dynamic>.from(winnerSnapshot.value as Map),
+    );
+
+    // 패자1 정산
+    int loser1Transfer = 0;
+    UserWallet? newLoser1Wallet;
+    if (loser1Snapshot.exists) {
+      final loser1Wallet = UserWallet.fromJson(
+        Map<String, dynamic>.from(loser1Snapshot.value as Map),
+      );
+      // 패자 코인 부족 시 가진 만큼만 이전
+      loser1Transfer = loser1Wallet.coin < loser1TransferAmount
+          ? loser1Wallet.coin
+          : loser1TransferAmount;
+      newLoser1Wallet = loser1Wallet.copyWith(
+        coin: (loser1Wallet.coin - loser1Transfer).clamp(0, loser1Wallet.coin),
+      );
+    }
+
+    // 패자2 정산
+    int loser2Transfer = 0;
+    UserWallet? newLoser2Wallet;
+    if (loser2Snapshot.exists) {
+      final loser2Wallet = UserWallet.fromJson(
+        Map<String, dynamic>.from(loser2Snapshot.value as Map),
+      );
+      // 패자 코인 부족 시 가진 만큼만 이전
+      loser2Transfer = loser2Wallet.coin < loser2TransferAmount
+          ? loser2Wallet.coin
+          : loser2TransferAmount;
+      newLoser2Wallet = loser2Wallet.copyWith(
+        coin: (loser2Wallet.coin - loser2Transfer).clamp(0, loser2Wallet.coin),
+      );
+    }
+
+    // 승자는 두 패자에게서 받은 금액의 합계를 수령
+    final totalTransfer = loser1Transfer + loser2Transfer;
+    final newWinnerWallet = winnerWallet.copyWith(
+      coin: winnerWallet.coin + totalTransfer,
+      totalEarned: winnerWallet.totalEarned + totalTransfer,
+    );
+
+    // 트랜잭션으로 코인 이전
+    final updates = <String, dynamic>{};
+    updates['users/$winnerUid/wallet'] = newWinnerWallet.toJson();
+    if (newLoser1Wallet != null) {
+      updates['users/$loser1Uid/wallet'] = newLoser1Wallet.toJson();
+    }
+    if (newLoser2Wallet != null) {
+      updates['users/$loser2Uid/wallet'] = newLoser2Wallet.toJson();
+    }
+
+    await _db.update(updates);
+    
+    // 정산 상세 내역 생성
+    String makeDetails(bool gwangBak, bool piBak, bool isLastGo) {
+      final List<String> details = [];
+      if (gwangBak) details.add('광박');
+      if (piBak) details.add('피박');
+      if (isLastGo) details.add('고박');
+      return details.isNotEmpty ? '(${details.join(', ')})' : '';
+    }
+    
+    final loser1Details = makeDetails(loser1GwangBak, loser1PiBak, loser1IsLastGoDeclarer);
+    final loser2Details = makeDetails(loser2GwangBak, loser2PiBak, loser2IsLastGoDeclarer);
+    
+    print('[CoinService] Gostop game settled: $winnerUid wins $loser1Transfer$loser1Details from $loser1Uid, $loser2Transfer$loser2Details from $loser2Uid (total: $totalTransfer)');
+
+    return (
+      loser1Transfer: loser1Transfer, 
+      loser2Transfer: loser2Transfer,
+      loser1Details: loser1Details,
+      loser2Details: loser2Details,
+    );
   }
 
   // ==================== 유저 정보 ====================
@@ -805,53 +955,70 @@ class CoinService {
 
   // ==================== 光끼 점수 시스템 ====================
 
+  /// 게임 중 광끼 점수 추가 (특수룰 발동 시)
+  /// - 뻑 발생 (내가 3장 못 가져감): +2점
+  /// - 피 빼앗김 (특수룰로 피 잃음): +2점
+  /// - 턴에 카드 획득 실패: +1점
+  ///
+  /// 반환값: 추가된 점수 (UI 애니메이션용)
+  Future<int> addGwangkkiScore({
+    required String uid,
+    required int points,
+  }) async {
+    if (points <= 0) return 0;
+
+    final walletRef = _db.child('users/$uid/wallet/gwangkki_score');
+
+    final result = await walletRef.runTransaction((data) {
+      double currentScore = (data as num?)?.toDouble() ?? 0;
+      double newScore = (currentScore + points).clamp(0, 100);
+      return Transaction.success(newScore);
+    });
+
+    if (result.committed) {
+      print('[CoinService] GwangKki score added for $uid: +$points (total: ${result.snapshot.value})');
+      return points;
+    }
+
+    return 0;
+  }
+
   /// 光끼 점수 업데이트 (게임 완료 시 호출)
-  /// - 모든 플레이어: 게임 1판당 +5점
-  /// - 승자 (30점 미만 승리): 변동 없음
-  /// - 승자 (30점 이상 승리): -5점
-  /// - 패자: 승자 점수 * 0.3 획득
-  Future<void> updateGwangkkiScores({
+  /// - 승자: 광끼 게이지 변동 없음
+  /// - 패자: 잃은 코인 수의 50%만큼 광끼게이지 축적
+  ///
+  /// 반환값: 패자에게 추가된 광끼 점수 (UI 표시용)
+  Future<int> updateGwangkkiScores({
     required String winnerUid,
     required String loserUid,
     required int winnerScore,
     required bool isDraw,
+    int lostCoins = 0,  // 패자가 잃은 코인 수
   }) async {
-    final winnerWalletRef = _db.child('users/$winnerUid/wallet/gwangkki_score');
-    final loserWalletRef = _db.child('users/$loserUid/wallet/gwangkki_score');
-
-    // 현재 점수 가져오기
-    final winnerSnapshot = await winnerWalletRef.get();
-    final loserSnapshot = await loserWalletRef.get();
-
-    double winnerCurrentScore = (winnerSnapshot.value as num?)?.toDouble() ?? 0;
-    double loserCurrentScore = (loserSnapshot.value as num?)?.toDouble() ?? 0;
-
-    // 기본: 모든 플레이어 +5점
-    winnerCurrentScore += 5;
-    loserCurrentScore += 5;
-
-    if (!isDraw) {
-      // 승자 점수 조정
-      if (winnerScore >= 30) {
-        // 30점 이상 승리: -5점 (기본 +5와 상쇄되어 총 0)
-        winnerCurrentScore -= 5;
-      }
-      // 30점 미만 승리: 변동 없음 (이미 +5 적용됨)
-
-      // 패자: 승자 점수 * 0.3 획득
-      double loserBonus = winnerScore * 0.3;
-      loserCurrentScore += loserBonus;
+    // 무승부 시 변동 없음
+    if (isDraw) {
+      print('[CoinService] GwangKki scores unchanged - Draw');
+      return 0;
     }
 
-    // 0~100 범위로 클램프
-    winnerCurrentScore = winnerCurrentScore.clamp(0, 100);
-    loserCurrentScore = loserCurrentScore.clamp(0, 100);
+    // 패자: 잃은 코인 수의 50%만큼 광끼게이지 축적
+    int loserBonus = (lostCoins * 0.5).round();
 
-    // 업데이트
-    await winnerWalletRef.set(winnerCurrentScore);
-    await loserWalletRef.set(loserCurrentScore);
+    if (loserBonus > 0) {
+      final loserWalletRef = _db.child('users/$loserUid/wallet/gwangkki_score');
 
-    print('[CoinService] GwangKki scores updated - Winner: $winnerCurrentScore, Loser: $loserCurrentScore');
+      await loserWalletRef.runTransaction((data) {
+        double currentScore = (data as num?)?.toDouble() ?? 0;
+        double newScore = (currentScore + loserBonus).clamp(0, 100);
+        return Transaction.success(newScore);
+      });
+
+      print('[CoinService] GwangKki scores updated - Winner: no change, Loser: +$loserBonus (lost $lostCoins coins)');
+    } else {
+      print('[CoinService] GwangKki scores unchanged - No coins lost');
+    }
+
+    return loserBonus;
   }
 
   /// 光끼 점수 리셋 (光끼 모드 종료 후)
@@ -891,6 +1058,56 @@ class CoinService {
     await resetGwangkkiScore(activatorUid);
 
     print('[CoinService] GwangKki mode settled - $winnerUid took $loserCoins coins from $loserUid');
+  }
+
+  /// 光끼 모드 정산 (3인 고스톱용)
+  /// - 승자가 패자 2명의 모든 코인(보관 코인 제외) 독식
+  Future<({int loser1Transfer, int loser2Transfer})> settleGwangkkiModeGostop({
+    required String winnerUid,
+    required String loser1Uid,
+    required String loser2Uid,
+    required bool isDraw,
+    required String activatorUid,
+  }) async {
+    if (isDraw) {
+      // 무승부: 코인 변동 없음, 발동자 점수만 리셋
+      await resetGwangkkiScore(activatorUid);
+      print('[CoinService] GwangKki mode (3P) ended in draw - no coin transfer');
+      return (loser1Transfer: 0, loser2Transfer: 0);
+    }
+
+    // 패자1의 모든 코인 가져오기 (보관 코인 제외)
+    final loser1Wallet = await getUserWallet(loser1Uid);
+    final loser1Coins = loser1Wallet?.coin ?? 0;
+
+    // 패자2의 모든 코인 가져오기 (보관 코인 제외)
+    final loser2Wallet = await getUserWallet(loser2Uid);
+    final loser2Coins = loser2Wallet?.coin ?? 0;
+
+    final totalTransfer = loser1Coins + loser2Coins;
+
+    if (totalTransfer > 0) {
+      // 패자1 코인 0으로
+      if (loser1Coins > 0) {
+        await _db.child('users/$loser1Uid/wallet/coin').set(0);
+      }
+      // 패자2 코인 0으로
+      if (loser2Coins > 0) {
+        await _db.child('users/$loser2Uid/wallet/coin').set(0);
+      }
+      // 승자에게 전체 코인 추가
+      await _db.child('users/$winnerUid/wallet/coin').runTransaction((value) {
+        final current = (value as num?)?.toInt() ?? 0;
+        return Transaction.success(current + totalTransfer);
+      });
+    }
+
+    // 발동자 光끼 점수 리셋
+    await resetGwangkkiScore(activatorUid);
+
+    print('[CoinService] GwangKki mode (3P) settled - $winnerUid took $loser1Coins from $loser1Uid, $loser2Coins from $loser2Uid (total: $totalTransfer)');
+    
+    return (loser1Transfer: loser1Coins, loser2Transfer: loser2Coins);
   }
 
   // ==================== 코인 보관/출금 시스템 ====================

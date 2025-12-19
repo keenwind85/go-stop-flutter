@@ -21,16 +21,19 @@ class SlotMachineService {
   // ==================== 상수 정의 ====================
 
   /// 최소 베팅 금액
-  static const int minBet = 10;
+  static const int minBet = 5;
 
   /// 최대 베팅 금액
   static const int maxBet = 100;
 
-  /// 일일 스핀 제한
+  /// 일일 스핀 제한 (기본 무료 횟수)
   static const int maxDailySpins = 10;
 
+  /// 게임 완료 시 획득하는 보너스 스핀 횟수
+  static const int bonusSpinsPerGame = 5;
+
   /// 베팅 금액 옵션
-  static const List<int> betOptions = [10, 50, 100];
+  static const List<int> betOptions = [5, 10, 20, 50, 100];
 
   /// 확률 테이블 (1000 기준 누적 확률)
   /// - 잭팟 (특별월 3매치): 0.4%
@@ -71,7 +74,10 @@ class SlotMachineService {
     final dailyRef = _db.child('users/$uid/daily_actions');
     final snapshot = await dailyRef.get();
 
+    print('[SlotMachineService] canSpin - today: $today, uid: $uid');
+
     if (!snapshot.exists) {
+      print('[SlotMachineService] canSpin - No daily_actions data, fresh start');
       return (canSpin: true, remainingBase: maxDailySpins, remainingBonus: 0, totalRemaining: maxDailySpins, message: null);
     }
 
@@ -81,15 +87,19 @@ class SlotMachineService {
     final bonusSlotCount = (data['bonus_slot_count'] as num?)?.toInt() ?? 0;
     final bonusSlotEarned = (data['bonus_slot_earned'] as num?)?.toInt() ?? 0;
 
-    // 새로운 날이면 기본 횟수 리셋, 미사용 보너스는 유지
+    print('[SlotMachineService] canSpin - lastSlotDate: $lastSlotDate, slotSpinCount: $slotSpinCount');
+
+    // 새로운 날이면 기본 횟수와 보너스 횟수 모두 리셋
     if (!_isSameDay(lastSlotDate, today)) {
-      final unusedBonus = (bonusSlotEarned - bonusSlotCount).clamp(0, 999);
-      return (canSpin: true, remainingBase: maxDailySpins, remainingBonus: unusedBonus, totalRemaining: maxDailySpins + unusedBonus, message: null);
+      print('[SlotMachineService] canSpin - New day! Resetting. lastSlotDate=$lastSlotDate vs today=$today');
+      return (canSpin: true, remainingBase: maxDailySpins, remainingBonus: 0, totalRemaining: maxDailySpins, message: null);
     }
 
     final remainingBase = maxDailySpins - slotSpinCount;
     final remainingBonus = bonusSlotEarned - bonusSlotCount;
     final totalRemaining = remainingBase + remainingBonus;
+
+    print('[SlotMachineService] canSpin - Same day. remainingBase: $remainingBase, remainingBonus: $remainingBonus');
 
     if (totalRemaining <= 0) {
       return (
@@ -171,10 +181,8 @@ class SlotMachineService {
     final isSameDaySlot = _isSameDay(lastSlotDate, today);
     final currentBaseCount = isSameDaySlot ? slotSpinCount : 0;
     final currentBonusCount = isSameDaySlot ? bonusSlotCount : 0;
-    // 새로운 날: 전날 미사용 보너스를 새로운 획득량으로 전환
-    final currentBonusEarned = isSameDaySlot
-        ? bonusSlotEarned
-        : (bonusSlotEarned - bonusSlotCount).clamp(0, 999);
+    // 새로운 날이면 보너스 횟수도 0으로 리셋
+    final currentBonusEarned = isSameDaySlot ? bonusSlotEarned : 0;
 
     final remainingBase = maxDailySpins - currentBaseCount;
     final remainingBonus = currentBonusEarned - currentBonusCount;
@@ -333,7 +341,10 @@ class SlotMachineService {
     final dailyRef = _db.child('users/$uid/daily_actions');
     final snapshot = await dailyRef.get();
 
+    print('[SlotMachineService] getTodayStats - today: $today, uid: $uid');
+
     if (!snapshot.exists) {
+      print('[SlotMachineService] No daily_actions data exists, returning fresh stats');
       return (baseUsed: 0, baseRemaining: maxDailySpins, bonusUsed: 0, bonusRemaining: 0, totalRemaining: maxDailySpins);
     }
 
@@ -343,13 +354,18 @@ class SlotMachineService {
     final bonusSlotCount = (data['bonus_slot_count'] as num?)?.toInt() ?? 0;
     final bonusSlotEarned = (data['bonus_slot_earned'] as num?)?.toInt() ?? 0;
 
+    print('[SlotMachineService] DB data - lastSlotDate: $lastSlotDate, slotSpinCount: $slotSpinCount, bonusSlotCount: $bonusSlotCount, bonusSlotEarned: $bonusSlotEarned');
+
+    // 새로운 날이면 기본 횟수와 보너스 횟수 모두 리셋
     if (!_isSameDay(lastSlotDate, today)) {
-      final unusedBonus = (bonusSlotEarned - bonusSlotCount).clamp(0, 999);
-      return (baseUsed: 0, baseRemaining: maxDailySpins, bonusUsed: 0, bonusRemaining: unusedBonus, totalRemaining: maxDailySpins + unusedBonus);
+      print('[SlotMachineService] New day detected! Resetting daily stats. lastSlotDate=$lastSlotDate, today=$today');
+      return (baseUsed: 0, baseRemaining: maxDailySpins, bonusUsed: 0, bonusRemaining: 0, totalRemaining: maxDailySpins);
     }
 
     final baseRemaining = (maxDailySpins - slotSpinCount).clamp(0, maxDailySpins);
     final bonusRemaining = (bonusSlotEarned - bonusSlotCount).clamp(0, 999);
+
+    print('[SlotMachineService] Same day - baseRemaining: $baseRemaining, bonusRemaining: $bonusRemaining');
 
     return (
       baseUsed: slotSpinCount,

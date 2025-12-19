@@ -11,6 +11,7 @@ import '../../services/debug_config_service.dart';
 import '../../models/game_room.dart';
 import '../../models/user_wallet.dart';
 import '../game/game_screen_new.dart';
+import '../game/widgets/game_avatar.dart'; // CardPreloader
 import '../widgets/screen_size_warning_overlay.dart';
 import '../widgets/retro_background.dart';
 import '../widgets/retro_button.dart';
@@ -55,6 +56,12 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     );
+    
+    // 카드 이미지 프리로딩 (로비에서 미리 시작하여 게임 화면 진입 시 로딩 완료)
+    // 웹 브라우저에서 동시 요청 제한으로 인한 이미지 로드 실패 방지
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      CardPreloader.preloadAll(context);
+    });
   }
 
   /// 표시할 닉네임 (커스텀 닉네임 우선, 없으면 구글 닉네임)
@@ -284,6 +291,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
     );
   }
 
+  /// 게임 모드 선택 다이얼로그 표시 후 방 생성
   Future<void> _createRoom() async {
     final authService = ref.read(authServiceProvider);
     final coinService = ref.read(coinServiceProvider);
@@ -297,6 +305,14 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       return;
     }
 
+    // 게임 모드 선택 다이얼로그 표시
+    final selectedMode = await showDialog<GameMode>(
+      context: context,
+      builder: (context) => const _GameModeSelectionDialog(),
+    );
+
+    if (selectedMode == null || !mounted) return;
+
     setState(() => _isLoading = true);
 
     try {
@@ -304,6 +320,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
       final room = await roomService.createRoom(
         hostUid: user.uid,
         hostName: _getDisplayName(user.displayName),
+        gameMode: selectedMode,
       );
 
       if (mounted) {
@@ -945,22 +962,67 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen>
                                   color: AppColors.woodDark,
                                   size: 32,
                                 ),
-                                title: Text(
-                                  '방 코드: ${room.roomId}',
-                                  style: const TextStyle(
-                                    color: AppColors.woodDark,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  '호스트: ${room.host.displayName}',
-                                  style: TextStyle(
-                                    color: AppColors.woodDark.withValues(
-                                      alpha: 0.7,
+                                title: Row(
+                                  children: [
+                                    Text(
+                                      '방 코드: ${room.roomId}',
+                                      style: const TextStyle(
+                                        color: AppColors.woodDark,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
                                     ),
-                                    fontSize: 14,
-                                  ),
+                                    const SizedBox(width: 8),
+                                    // 게임 모드 태그
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: room.gameMode == GameMode.gostop
+                                            ? Colors.orange
+                                            : Colors.blue,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        room.gameMode == GameMode.gostop
+                                            ? '3인'
+                                            : '2인',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                subtitle: Row(
+                                  children: [
+                                    Text(
+                                      '호스트: ${room.host.displayName}',
+                                      style: TextStyle(
+                                        color: AppColors.woodDark.withValues(
+                                          alpha: 0.7,
+                                        ),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      room.gameMode == GameMode.gostop
+                                          ? '고스톱'
+                                          : '맞고',
+                                      style: TextStyle(
+                                        color: room.gameMode == GameMode.gostop
+                                            ? Colors.orange.shade700
+                                            : Colors.blue.shade700,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 trailing: RetroButton(
                                   onPressed: () => _joinRoom(room),
@@ -2627,6 +2689,211 @@ class _MyItemsDialog extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 게임 모드 선택 다이얼로그
+class _GameModeSelectionDialog extends StatelessWidget {
+  const _GameModeSelectionDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 320,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppColors.woodDark,
+              AppColors.woodDark.withValues(alpha: 0.95),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.woodLight, width: 3),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 헤더
+            Row(
+              children: [
+                const Icon(Icons.videogame_asset, color: AppColors.accent, size: 28),
+                const SizedBox(width: 10),
+                const Text(
+                  '게임 모드 선택',
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '플레이할 게임 모드를 선택하세요',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 맞고 (2인) 버튼
+            _buildModeButton(
+              context: context,
+              mode: GameMode.matgo,
+              title: '맞고',
+              subtitle: '2인 대전',
+              description: '손패 10장, 바닥 8장\n7점 이상 승리',
+              icon: Icons.people,
+              color: Colors.blue,
+            ),
+            const SizedBox(height: 12),
+
+            // 고스톱 (3인) 버튼
+            _buildModeButton(
+              context: context,
+              mode: GameMode.gostop,
+              title: '고스톱',
+              subtitle: '3인 대전',
+              description: '손패 7장, 바닥 6장\n3점 이상 승리',
+              icon: Icons.groups,
+              color: Colors.orange,
+            ),
+            const SizedBox(height: 16),
+
+            // 취소 버튼
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                '취소',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModeButton({
+    required BuildContext context,
+    required GameMode mode,
+    required String title,
+    required String subtitle,
+    required String description,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(mode),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                color.withValues(alpha: 0.3),
+                color.withValues(alpha: 0.1),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: color.withValues(alpha: 0.5),
+              width: 2,
+            ),
+          ),
+          child: Row(
+            children: [
+              // 아이콘
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.3),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(width: 14),
+              // 텍스트
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            subtitle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 화살표
+              Icon(
+                Icons.arrow_forward_ios,
+                color: color.withValues(alpha: 0.7),
+                size: 18,
+              ),
+            ],
+          ),
         ),
       ),
     );

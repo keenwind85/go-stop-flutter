@@ -9,19 +9,36 @@ final soundServiceProvider = Provider<SoundService>((ref) {
 
 /// 게임 사운드 효과 서비스
 class SoundService {
-  final AudioPlayer _bgmPlayer = AudioPlayer();
-  final AudioPlayer _sfxPlayer = AudioPlayer();
+  AudioPlayer _bgmPlayer = AudioPlayer();
+  AudioPlayer _sfxPlayer = AudioPlayer();
+  bool _isDisposed = false; // dispose 상태 추적
 
-  bool _isMuted = true; // 기본값: 음소거 모드
+  bool _isMuted = false; // 기본값: 사운드 켜짐 (사용자 설정 로드 후 덮어씀)
   double _volume = 0.7;
 
   bool get isMuted => _isMuted;
   double get volume => _volume;
 
-  /// 초기화
+  /// 초기화 (dispose 후 재진입 시 AudioPlayer 재생성)
   Future<void> initialize() async {
+    // dispose된 상태면 AudioPlayer 재생성
+    if (_isDisposed) {
+      _bgmPlayer = AudioPlayer();
+      _sfxPlayer = AudioPlayer();
+      _isDisposed = false;
+    }
+
     await _bgmPlayer.setReleaseMode(ReleaseMode.loop);
     await _sfxPlayer.setReleaseMode(ReleaseMode.release);
+
+    // 현재 음소거 상태에 따라 볼륨 설정
+    if (_isMuted) {
+      await _bgmPlayer.setVolume(0);
+      await _sfxPlayer.setVolume(0);
+    } else {
+      await _bgmPlayer.setVolume(_volume);
+      await _sfxPlayer.setVolume(_volume);
+    }
   }
 
   /// 사용자 설정에 따라 음소거 상태 적용
@@ -88,19 +105,19 @@ class SoundService {
     await _playSfx('sounds/tak-miss.mp3');
   }
 
-  /// 카드 뒤집기 효과음
+  /// 카드 뒤집기 효과음 (효과음 없음)
   Future<void> playCardFlip() async {
-    await _playSfx('sounds/card_flip.mp3');
+    // 효과음 없음
   }
 
   /// 카드 놓기 효과음
   Future<void> playCardPlace() async {
-    await _playSfx('sounds/card_place.mp3');
+    await _playSfx('sounds/tak-miss.mp3');
   }
 
   /// 카드 매칭 효과음
   Future<void> playCardMatch() async {
-    await _playSfx('sounds/card_match.mp3');
+    await _playSfx('sounds/tak-match.mp3');
   }
 
   // ========================================
@@ -135,10 +152,13 @@ class SoundService {
         await _playSfx('sounds/bomb.mp3'); // 폭탄
         break;
       case SpecialEvent.chongtong:
-        await _playSfx('sounds/chongtong.mp3');
+        // 총통 효과음 없음
         break;
       case SpecialEvent.bonusCardUsed:
         await _playSfx('sounds/bonus.mp3'); // 보너스패
+        break;
+      case SpecialEvent.meongTta:
+        await _playSfx('sounds/ssl.mp3.mp3'); // 멍따 (경고음)
         break;
       case SpecialEvent.none:
         break;
@@ -187,14 +207,14 @@ class SoundService {
     await _playSfx('sounds/loser.mp3');
   }
 
-  /// Go 선언 효과음
+  /// Go 선언 효과음 (효과음 없음)
   Future<void> playGo() async {
-    await _playSfx('sounds/go.mp3');
+    // 효과음 없음
   }
 
-  /// Stop 선언 효과음
+  /// Stop 선언 효과음 (효과음 없음)
   Future<void> playStop() async {
-    await _playSfx('sounds/stop.mp3');
+    // 효과음 없음
   }
 
   /// 승리 효과음 (레거시 - playWinner 사용 권장)
@@ -207,30 +227,31 @@ class SoundService {
     await _playSfx('sounds/loser.mp3');
   }
 
-  /// 나가리 효과음
+  /// 나가리 효과음 (효과음 없음)
   Future<void> playNagari() async {
-    await _playSfx('sounds/nagari.mp3');
+    // 효과음 없음
   }
 
-  /// 버튼 클릭 효과음
+  /// 버튼 클릭 효과음 (효과음 없음)
   Future<void> playClick() async {
-    await _playSfx('sounds/click.mp3');
+    // 효과음 없음
   }
 
-  /// 턴 알림 효과음
+  /// 턴 알림 효과음 (효과음 없음)
   Future<void> playTurnNotify() async {
-    await _playSfx('sounds/turn.mp3');
+    // 효과음 없음
   }
 
   /// 배경음악 재생
   Future<void> playBgm() async {
-    if (isMuted) return;
-    try {
-      await _bgmPlayer.play(AssetSource('sounds/bgm.mp3'));
-      await _bgmPlayer.setVolume(_volume * 0.5); // BGM은 좀 더 낮게
-    } catch (e) {
-      // 사운드 파일이 없을 수 있음
-    }
+    // BGM 파일이 없으므로 비활성화
+    // if (isMuted) return;
+    // try {
+    //   await _bgmPlayer.play(AssetSource('sounds/bgm.mp3'));
+    //   await _bgmPlayer.setVolume(_volume * 0.5); // BGM은 좀 더 낮게
+    // } catch (e) {
+    //   // 사운드 파일이 없을 수 있음
+    // }
   }
 
   /// 배경음악 정지
@@ -245,6 +266,7 @@ class SoundService {
       await _sfxPlayer.play(AssetSource(asset));
     } catch (e) {
       // 사운드 파일이 없을 수 있음 - 웹에서는 무시
+      print('[SoundService] Failed to play: $asset - $e');
     }
   }
 
@@ -252,5 +274,6 @@ class SoundService {
   void dispose() {
     _bgmPlayer.dispose();
     _sfxPlayer.dispose();
+    _isDisposed = true; // dispose 상태 기록 (다음 initialize에서 재생성 필요)
   }
 }

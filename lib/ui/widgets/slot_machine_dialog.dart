@@ -31,7 +31,7 @@ class _SlotMachineDialogState extends ConsumerState<SlotMachineDialog>
 
   // 상태 변수
   int _currentCoin = 0;
-  int _betAmount = 10;
+  int _betAmount = 5;
   int _remainingBase = 10;   // 기본 횟수 (매일 10회)
   int _remainingBonus = 0;   // 보너스 횟수 (게임 완료로 획득)
   bool _isSpinning = false;
@@ -212,16 +212,18 @@ class _SlotMachineDialogState extends ConsumerState<SlotMachineDialog>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _buildCoinDisplay(),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     _buildSlotMachine(),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     _buildResultDisplay(),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
                     _buildBetSelector(),
                     const SizedBox(height: 10),
                     _buildSpinButton(),
                     const SizedBox(height: 6),
                     _buildPayoutInfo(),
+                    const SizedBox(height: 8),
+                    _buildUsageInfo(),
                     const SizedBox(height: 12),
                   ],
                 ),
@@ -512,12 +514,12 @@ class _SlotMachineDialogState extends ConsumerState<SlotMachineDialog>
                       },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? Colors.amber.withValues(alpha: 0.3)
                         : Colors.white.withValues(alpha: canAfford ? 0.1 : 0.05),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
                           ? Colors.amber
@@ -530,15 +532,16 @@ class _SlotMachineDialogState extends ConsumerState<SlotMachineDialog>
                     children: [
                       Icon(
                         Icons.monetization_on,
-                        size: 16,
+                        size: 12,
                         color: canAfford
                             ? (isSelected ? Colors.amber : Colors.amber.withValues(alpha: 0.7))
                             : Colors.grey,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 2),
                       Text(
                         '$amount',
                         style: TextStyle(
+                          fontSize: 12,
                           color: canAfford
                               ? (isSelected ? Colors.amber : AppColors.text)
                               : Colors.grey,
@@ -671,6 +674,89 @@ class _SlotMachineDialogState extends ConsumerState<SlotMachineDialog>
           ),
           Text(
             payout,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 이용 안내 정보
+  Widget _buildUsageInfo() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.cyan.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: Colors.cyan.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.access_time,
+                color: Colors.cyan.withValues(alpha: 0.8),
+                size: 14,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '이용 안내',
+                style: TextStyle(
+                  color: Colors.cyan.withValues(alpha: 0.9),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _buildUsageRow(
+            '기본 횟수',
+            '매일 ${SlotMachineService.maxDailySpins}회 무료',
+            Colors.amber,
+          ),
+          _buildUsageRow(
+            '보너스 횟수',
+            '게임 완료 시 +${SlotMachineService.bonusSpinsPerGame}회',
+            Colors.greenAccent,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '※ 매일 자정에 모든 횟수가 초기화됩니다',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.5),
+              fontSize: 9,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUsageRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 11,
+            ),
+          ),
+          Text(
+            value,
             style: TextStyle(
               color: color,
               fontSize: 11,

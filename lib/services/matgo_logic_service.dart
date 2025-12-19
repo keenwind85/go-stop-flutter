@@ -107,12 +107,12 @@ class MatgoLogicService {
 
   /// 덱/손패 소진 시 게임 종료 조건 체크
   ///
-  /// 규칙:
-  /// 1. 양쪽 모두 7점 미만 + 고 선언자 없음 = 나가리
+  /// 규칙 (모드별 승리 점수: 맞고 7점, 고스톱 3점):
+  /// 1. 양쪽 모두 승리 점수 미만 + 고 선언자 없음 = 나가리
   /// 2. 고 선언자가 있는 경우:
-  ///    - 상대방이 7점 미만 = 고 선언자 자동 승리 (autoWin)
-  ///    - 상대방이 7점 이상 = 고박! 상대방 승리 (gobak)
-  /// 3. 한 명만 7점 이상 (고 선언자 없음) = 7점 이상인 플레이어 승리 (강제 스톱)
+  ///    - 상대방이 승리 점수 미만 = 고 선언자 자동 승리 (autoWin)
+  ///    - 상대방이 승리 점수 이상 = 고박! 상대방 승리 (gobak)
+  /// 3. 한 명만 승리 점수 이상 (고 선언자 없음) = 해당 플레이어 승리 (강제 스톱)
   GameEndCheckResult checkGameEndOnExhaustion({
     required int myScore,
     required int opponentScore,
@@ -124,8 +124,9 @@ class MatgoLogicService {
     required int opponentMultiplier,
     required CapturedCards myCaptured,
     required CapturedCards opponentCaptured,
+    required GameMode gameMode,
   }) {
-    final threshold = GameConstants.goStopThreshold;
+    final threshold = gameMode.winThreshold;
 
     // 고 선언자 확인
     final iHaveGo = myGoCount > 0;
@@ -134,13 +135,14 @@ class MatgoLogicService {
     // 케이스 1: 내가 고를 선언한 상태
     if (iHaveGo) {
       if (opponentScore >= threshold) {
-        // 고박! 상대방이 7점 이상 도달 → 상대방 승리
+        // 고박! 상대방이 승리 점수 이상 도달 → 상대방 승리
         final finalResult = ScoreCalculator.calculateFinalScore(
           myCaptures: opponentCaptured,
           opponentCaptures: myCaptured,
           goCount: 0,  // 고박당한 쪽은 고 카운트 0
           playerMultiplier: opponentMultiplier,
           isGobak: true,  // 고박 배수 적용
+          gameMode: gameMode,
         );
         return GameEndCheckResult(
           endState: GameEndState.gobak,
@@ -149,12 +151,13 @@ class MatgoLogicService {
           isGobak: true,
         );
       } else {
-        // 상대방 7점 미만 → 내가 자동 승리 (강제 스톱)
+        // 상대방 승리 점수 미만 → 내가 자동 승리 (강제 스톱)
         final finalResult = ScoreCalculator.calculateFinalScore(
           myCaptures: myCaptured,
           opponentCaptures: opponentCaptured,
           goCount: myGoCount,
           playerMultiplier: myMultiplier,
+          gameMode: gameMode,
         );
         return GameEndCheckResult(
           endState: GameEndState.autoWin,
@@ -167,13 +170,14 @@ class MatgoLogicService {
     // 케이스 2: 상대방이 고를 선언한 상태
     if (opponentHasGo) {
       if (myScore >= threshold) {
-        // 고박! 내가 7점 이상 도달 → 내가 승리
+        // 고박! 내가 승리 점수 이상 도달 → 내가 승리
         final finalResult = ScoreCalculator.calculateFinalScore(
           myCaptures: myCaptured,
           opponentCaptures: opponentCaptured,
           goCount: 0,
           playerMultiplier: myMultiplier,
           isGobak: true,
+          gameMode: gameMode,
         );
         return GameEndCheckResult(
           endState: GameEndState.gobak,
@@ -182,12 +186,13 @@ class MatgoLogicService {
           isGobak: true,
         );
       } else {
-        // 내가 7점 미만 → 상대방 자동 승리
+        // 내가 승리 점수 미만 → 상대방 자동 승리
         final finalResult = ScoreCalculator.calculateFinalScore(
           myCaptures: opponentCaptured,
           opponentCaptures: myCaptured,
           goCount: opponentGoCount,
           playerMultiplier: opponentMultiplier,
+          gameMode: gameMode,
         );
         return GameEndCheckResult(
           endState: GameEndState.autoWin,
@@ -199,17 +204,18 @@ class MatgoLogicService {
 
     // 케이스 3: 아무도 고를 선언하지 않은 상태
     if (myScore < threshold && opponentScore < threshold) {
-      // 양쪽 모두 7점 미만 = 나가리
+      // 양쪽 모두 승리 점수 미만 = 나가리
       return const GameEndCheckResult(endState: GameEndState.nagari);
     }
 
-    // 케이스 4: 한 명이 7점 이상 (고 없이 덱 소진) - 7점 이상인 사람이 강제 스톱
+    // 케이스 4: 한 명이 승리 점수 이상 (고 없이 덱 소진) - 해당 사람이 강제 스톱
     if (myScore >= threshold) {
       final finalResult = ScoreCalculator.calculateFinalScore(
         myCaptures: myCaptured,
         opponentCaptures: opponentCaptured,
         goCount: 0,
         playerMultiplier: myMultiplier,
+        gameMode: gameMode,
       );
       return GameEndCheckResult(
         endState: GameEndState.win,
@@ -222,6 +228,7 @@ class MatgoLogicService {
         opponentCaptures: myCaptured,
         goCount: 0,
         playerMultiplier: opponentMultiplier,
+        gameMode: gameMode,
       );
       return GameEndCheckResult(
         endState: GameEndState.win,
@@ -229,6 +236,46 @@ class MatgoLogicService {
         finalScore: finalResult.finalScore,
       );
     }
+  }
+
+  /// 3인 고스톱 덱/손패 소진 시 게임 종료 조건 체크
+  ///
+  /// 3인 고스톱 규칙:
+  /// 1. 덱 소진 시 고박 판정 없음
+  /// 2. 3명의 점수를 비교하여 가장 높은 사람이 승리
+  /// 3. 최고 점수가 동점이면 나가리
+  /// 4. 모두 승리 점수(3점) 미만이면 나가리
+  GameEndCheckResult checkGameEndOnExhaustion3P({
+    required List<({String uid, int score})> playerScores,
+    required GameMode gameMode,
+  }) {
+    final threshold = gameMode.winThreshold;
+
+    // 점수 내림차순 정렬
+    final sortedScores = List<({String uid, int score})>.from(playerScores)
+      ..sort((a, b) => b.score.compareTo(a.score));
+
+    final highestScore = sortedScores[0].score;
+    final secondScore = sortedScores[1].score;
+
+    // 모두 승리 점수 미만이면 나가리
+    if (highestScore < threshold) {
+      return const GameEndCheckResult(endState: GameEndState.nagari);
+    }
+
+    // 1등과 2등이 동점이면 나가리
+    if (highestScore == secondScore) {
+      return const GameEndCheckResult(endState: GameEndState.nagari);
+    }
+
+    // 단독 1등이 승리 점수 이상이면 승리
+    final winnerUid = sortedScores[0].uid;
+    return GameEndCheckResult(
+      endState: GameEndState.win,
+      winner: winnerUid,
+      finalScore: highestScore,
+      isGobak: false,  // 3인 덱 소진 시 고박 없음
+    );
   }
 
   /// 카드 타입 우선순위 반환 (광 > 열끗 > 띠 > 피)
@@ -361,6 +408,103 @@ class MatgoLogicService {
     );
   }
 
+  /// 선 결정 (고스톱 3인 모드용)
+  FirstTurnResult determineFirstTurn3P({
+    required String hostUid,
+    required String guestUid,
+    required String guest2Uid,
+    required List<CardData> hostHand,
+    required List<CardData> guestHand,
+    required List<CardData> guest2Hand,
+    required int gameCount,
+    String? lastWinner,
+    required String hostName,
+    required String guestName,
+    required String guest2Name,
+  }) {
+    // 재대결인 경우 이전 승자가 선
+    if (gameCount > 0 && lastWinner != null) {
+      String winnerName;
+      if (lastWinner == hostUid) {
+        winnerName = hostName;
+      } else if (lastWinner == guestUid) {
+        winnerName = guestName;
+      } else {
+        winnerName = guest2Name;
+      }
+      return FirstTurnResult(
+        firstPlayerUid: lastWinner,
+        decidingMonth: 0,
+        reason: '$winnerName님이 이전 판 승자로 선이 되었습니다',
+        isRematch: true,
+      );
+    }
+
+    // 첫 게임: 카드 비교로 선 결정 (3명 모두 비교)
+    final (hostHighestMonth, hostCard) = _findHighestMonthCard(hostHand);
+    final (guestHighestMonth, guestCard) = _findHighestMonthCard(guestHand);
+    final (guest2HighestMonth, guest2Card) = _findHighestMonthCard(guest2Hand);
+
+    // 플레이어 정보를 리스트로 관리
+    final players = [
+      (uid: hostUid, name: hostName, month: hostHighestMonth, card: hostCard, hand: hostHand),
+      (uid: guestUid, name: guestName, month: guestHighestMonth, card: guestCard, hand: guestHand),
+      (uid: guest2Uid, name: guest2Name, month: guest2HighestMonth, card: guest2Card, hand: guest2Hand),
+    ];
+
+    // 가장 높은 월을 가진 플레이어들 찾기
+    final maxMonth = [hostHighestMonth, guestHighestMonth, guest2HighestMonth].reduce((a, b) => a > b ? a : b);
+    final topPlayers = players.where((p) => p.month == maxMonth).toList();
+
+    if (topPlayers.length == 1) {
+      // 한 명만 최고 월 보유
+      final winner = topPlayers.first;
+      return FirstTurnResult(
+        firstPlayerUid: winner.uid,
+        decidingMonth: winner.month,
+        reason: '${winner.name}님이 ${winner.month}월 패를 보유하여 선이 되었습니다',
+      );
+    }
+
+    // 같은 월인 경우 카드 타입으로 결정 (광 > 열끗 > 띠 > 피)
+    if (topPlayers.every((p) => p.card != null)) {
+      final withPriority = topPlayers.map((p) => (
+        player: p,
+        priority: _getCardTypePriority(p.card!.type),
+      )).toList();
+      
+      final maxPriority = withPriority.map((p) => p.priority).reduce((a, b) => a > b ? a : b);
+      final topByType = withPriority.where((p) => p.priority == maxPriority).toList();
+
+      if (topByType.length == 1) {
+        final winner = topByType.first.player;
+        final typeName = _getCardTypeName(winner.card!.type);
+        return FirstTurnResult(
+          firstPlayerUid: winner.uid,
+          decidingMonth: winner.month,
+          reason: '${winner.name}님이 ${winner.month}월 $typeName을 보유하여 선이 되었습니다',
+        );
+      }
+
+      // 같은 타입인 경우 두 번째로 높은 월 비교
+      for (final player in topByType) {
+        final remaining = player.player.hand.where((c) => c.month != maxMonth).toList();
+        if (remaining.isNotEmpty) {
+          final (nextMonth, _) = _findHighestMonthCard(remaining);
+          // 두 번째 월도 비교 (단순화: 첫 번째로 더 높은 두 번째 월을 가진 플레이어)
+          // 더 정교한 비교가 필요하면 추가 로직 구현
+        }
+      }
+    }
+
+    // 완전히 동일한 경우 방장이 선 (기본)
+    return FirstTurnResult(
+      firstPlayerUid: hostUid,
+      decidingMonth: maxMonth,
+      reason: '$hostName님이 방장으로 선이 되었습니다',
+    );
+  }
+
   /// 카드 타입 이름 반환
   String _getCardTypeName(CardType type) {
     switch (type) {
@@ -377,39 +521,136 @@ class MatgoLogicService {
     }
   }
 
+  /// 다음 턴 플레이어 결정 (2인/3인 모드 지원)
+  /// - 2인 모드: 현재 플레이어의 상대방 반환
+  /// - 3인 모드: turnOrder 순환 (방장 → 게스트1 → 게스트2 → 방장...)
+  String _getNextTurn(List<String> turnOrder, String currentPlayerUid) {
+    if (turnOrder.length > 2) {
+      // 3인 모드: turnOrder 순환
+      final currentIndex = turnOrder.indexOf(currentPlayerUid);
+      if (currentIndex == -1) {
+        // 예외 상황: 현재 플레이어가 목록에 없으면 첫 번째 플레이어 반환
+        return turnOrder.first;
+      }
+      final nextIndex = (currentIndex + 1) % turnOrder.length;
+      return turnOrder[nextIndex];
+    }
+    // 2인 모드: 현재 플레이어가 아닌 상대방 반환
+    return turnOrder.firstWhere(
+      (uid) => uid != currentPlayerUid,
+      orElse: () => turnOrder.first,
+    );
+  }
+
+  /// 플레이어별 고 횟수 가져오기
+  int _getPlayerGoCount(ScoreInfo scores, int playerNumber) {
+    switch (playerNumber) {
+      case 1:
+        return scores.player1GoCount;
+      case 2:
+        return scores.player2GoCount;
+      case 3:
+        return scores.player3GoCount;
+      default:
+        return 0;
+    }
+  }
+
+  /// 플레이어별 점수 가져오기
+  int _getPlayerScore(ScoreInfo scores, int playerNumber) {
+    switch (playerNumber) {
+      case 1:
+        return scores.player1Score;
+      case 2:
+        return scores.player2Score;
+      case 3:
+        return scores.player3Score;
+      default:
+        return 0;
+    }
+  }
+
+  /// 플레이어별 배수 가져오기
+  int _getPlayerMultiplier(ScoreInfo scores, int playerNumber) {
+    switch (playerNumber) {
+      case 1:
+        return scores.player1Multiplier;
+      case 2:
+        return scores.player2Multiplier;
+      case 3:
+        return scores.player3Multiplier;
+      default:
+        return 1;
+    }
+  }
+
   /// 게임 초기화 (방장이 호출)
+  /// - 맞고 (2인): hostUid, guestUid 필수
+  /// - 고스톱 (3인): guest2Uid, guest2Name 추가 필수
   Future<GameState?> initializeGame({
     required String roomId,
     required String hostUid,
     required String guestUid,
     required String hostName,
     required String guestName,
+    String? guest2Uid,      // 고스톱 3인용
+    String? guest2Name,     // 고스톱 3인용
     int gameCount = 0,
     String? lastWinner,
+    GameMode gameMode = GameMode.matgo,
   }) async {
     final deck = DeckGenerator.generateDeck();
-    final dealResult = DeckGenerator.dealCards(deck);
+    final dealResult = DeckGenerator.dealCards(deck, gameMode: gameMode);
 
-    // 선 결정
-    final firstTurnResult = determineFirstTurn(
-      hostUid: hostUid,
-      guestUid: guestUid,
-      hostHand: dealResult.player1Hand,
-      guestHand: dealResult.player2Hand,
-      gameCount: gameCount,
-      lastWinner: lastWinner,
-      hostName: hostName,
-      guestName: guestName,
-    );
+    // 턴 순서 설정 (고스톱 3인은 방장 → 게스트1 → 게스트2 순환)
+    final turnOrder = gameMode == GameMode.gostop && guest2Uid != null
+        ? [hostUid, guestUid, guest2Uid]
+        : [hostUid, guestUid];
+
+    // 선 결정 (고스톱 3인 모드는 3명 모두 비교)
+    final FirstTurnResult firstTurnResult;
+    if (gameMode == GameMode.gostop && guest2Uid != null && guest2Name != null) {
+      firstTurnResult = determineFirstTurn3P(
+        hostUid: hostUid,
+        guestUid: guestUid,
+        guest2Uid: guest2Uid,
+        hostHand: dealResult.player1Hand,
+        guestHand: dealResult.player2Hand,
+        guest2Hand: dealResult.player3Hand,
+        gameCount: gameCount,
+        lastWinner: lastWinner,
+        hostName: hostName,
+        guestName: guestName,
+        guest2Name: guest2Name,
+      );
+    } else {
+      firstTurnResult = determineFirstTurn(
+        hostUid: hostUid,
+        guestUid: guestUid,
+        hostHand: dealResult.player1Hand,
+        guestHand: dealResult.player2Hand,
+        gameCount: gameCount,
+        lastWinner: lastWinner,
+        hostName: hostName,
+        guestName: guestName,
+      );
+    }
 
     print('[MatgoLogic] First turn: ${firstTurnResult.firstPlayerUid}, reason: ${firstTurnResult.reason}');
 
-    // 총통 체크
-    if (dealResult.player1Chongtong && dealResult.player2Chongtong) {
-      // 둘 다 총통 -> 나가리 (양쪽 카드 모두 표시)
+    // 총통 체크 (고스톱 3인 모드에서는 3명 모두 체크)
+    final multipleChongtong = [
+      dealResult.player1Chongtong,
+      dealResult.player2Chongtong,
+      dealResult.player3Chongtong,
+    ].where((c) => c).length > 1;
+
+    if (multipleChongtong) {
+      // 2명 이상 총통 -> 나가리 (모든 총통 카드 표시)
       final allChongtongCards = [
         ...dealResult.player1ChongtongCards,
         ...dealResult.player2ChongtongCards,
+        ...dealResult.player3ChongtongCards,
       ];
       final gameState = GameState(
         turn: firstTurnResult.firstPlayerUid,
@@ -417,16 +658,22 @@ class MatgoLogicService {
         floorCards: dealResult.floorCards,
         player1Hand: dealResult.player1Hand,
         player2Hand: dealResult.player2Hand,
+        player3Hand: dealResult.player3Hand,
         player1Captured: const CapturedCards(),
         player2Captured: const CapturedCards(),
+        player3Captured: const CapturedCards(),
         scores: const ScoreInfo(),
         endState: GameEndState.nagari,
         lastEvent: SpecialEvent.chongtong,
+        lastEventAt: DateTime.now().millisecondsSinceEpoch,
         chongtongCards: allChongtongCards,
-        chongtongPlayer: null, // 둘 다 총통이므로 null
+        chongtongPlayer: null, // 다수 총통이므로 null
         firstTurnPlayer: firstTurnResult.firstPlayerUid,
         firstTurnDecidingMonth: firstTurnResult.decidingMonth,
         firstTurnReason: firstTurnResult.reason,
+        gameMode: gameMode,
+        turnOrder: turnOrder,
+        currentTurnIndex: turnOrder.indexOf(firstTurnResult.firstPlayerUid),
       );
 
       await _roomService.updateGameState(roomId: roomId, gameState: gameState);
@@ -440,43 +687,86 @@ class MatgoLogicService {
         floorCards: dealResult.floorCards,
         player1Hand: dealResult.player1Hand,
         player2Hand: dealResult.player2Hand,
+        player3Hand: dealResult.player3Hand,
         player1Captured: const CapturedCards(),
         player2Captured: const CapturedCards(),
+        player3Captured: const CapturedCards(),
         scores: const ScoreInfo(player1Score: GameConstants.chongtongScore),
         endState: GameEndState.chongtong,
         winner: hostUid,
         finalScore: GameConstants.chongtongScore,
         lastEvent: SpecialEvent.chongtong,
+        lastEventAt: DateTime.now().millisecondsSinceEpoch,
         chongtongCards: dealResult.player1ChongtongCards,
         chongtongPlayer: hostUid,
         firstTurnPlayer: firstTurnResult.firstPlayerUid,
         firstTurnDecidingMonth: firstTurnResult.decidingMonth,
         firstTurnReason: firstTurnResult.reason,
+        gameMode: gameMode,
+        turnOrder: turnOrder,
+        currentTurnIndex: turnOrder.indexOf(firstTurnResult.firstPlayerUid),
       );
 
       await _roomService.updateGameState(roomId: roomId, gameState: gameState);
       await _roomService.startGame(roomId);
       return gameState;
     } else if (dealResult.player2Chongtong) {
-      // 게스트 총통 승리
+      // 게스트1 총통 승리
       final gameState = GameState(
         turn: firstTurnResult.firstPlayerUid,
         deck: dealResult.deck,
         floorCards: dealResult.floorCards,
         player1Hand: dealResult.player1Hand,
         player2Hand: dealResult.player2Hand,
+        player3Hand: dealResult.player3Hand,
         player1Captured: const CapturedCards(),
         player2Captured: const CapturedCards(),
+        player3Captured: const CapturedCards(),
         scores: const ScoreInfo(player2Score: GameConstants.chongtongScore),
         endState: GameEndState.chongtong,
         winner: guestUid,
         finalScore: GameConstants.chongtongScore,
         lastEvent: SpecialEvent.chongtong,
+        lastEventAt: DateTime.now().millisecondsSinceEpoch,
         chongtongCards: dealResult.player2ChongtongCards,
         chongtongPlayer: guestUid,
         firstTurnPlayer: firstTurnResult.firstPlayerUid,
         firstTurnDecidingMonth: firstTurnResult.decidingMonth,
         firstTurnReason: firstTurnResult.reason,
+        gameMode: gameMode,
+        turnOrder: turnOrder,
+        currentTurnIndex: turnOrder.indexOf(firstTurnResult.firstPlayerUid),
+      );
+
+      await _roomService.updateGameState(roomId: roomId, gameState: gameState);
+      await _roomService.startGame(roomId);
+      return gameState;
+    } else if (dealResult.player3Chongtong && guest2Uid != null) {
+      // 게스트2 총통 승리 (고스톱 3인 전용)
+      final gameState = GameState(
+        turn: firstTurnResult.firstPlayerUid,
+        deck: dealResult.deck,
+        floorCards: dealResult.floorCards,
+        player1Hand: dealResult.player1Hand,
+        player2Hand: dealResult.player2Hand,
+        player3Hand: dealResult.player3Hand,
+        player1Captured: const CapturedCards(),
+        player2Captured: const CapturedCards(),
+        player3Captured: const CapturedCards(),
+        scores: const ScoreInfo(player3Score: GameConstants.chongtongScore),
+        endState: GameEndState.chongtong,
+        winner: guest2Uid,
+        finalScore: GameConstants.chongtongScore,
+        lastEvent: SpecialEvent.chongtong,
+        lastEventAt: DateTime.now().millisecondsSinceEpoch,
+        chongtongCards: dealResult.player3ChongtongCards,
+        chongtongPlayer: guest2Uid,
+        firstTurnPlayer: firstTurnResult.firstPlayerUid,
+        firstTurnDecidingMonth: firstTurnResult.decidingMonth,
+        firstTurnReason: firstTurnResult.reason,
+        gameMode: gameMode,
+        turnOrder: turnOrder,
+        currentTurnIndex: turnOrder.indexOf(firstTurnResult.firstPlayerUid),
       );
 
       await _roomService.updateGameState(roomId: roomId, gameState: gameState);
@@ -488,14 +778,31 @@ class MatgoLogicService {
     // 바닥에서 가져온 보너스 카드는 선공 플레이어에게
     var player1Captured = const CapturedCards();
     var player2Captured = const CapturedCards();
+    var player3Captured = const CapturedCards();
+    
+    print('[MatgoLogic] bonusFromFloor: ${dealResult.bonusFromFloor.length}장');
+    print('[MatgoLogic] firstTurnPlayer: ${firstTurnResult.firstPlayerUid}');
+    print('[MatgoLogic] hostUid: $hostUid, guestUid: $guestUid, guest2Uid: $guest2Uid');
+    
     if (dealResult.bonusFromFloor.isNotEmpty) {
-      // 선이 방장이면 방장에게, 게스트면 게스트에게
+      // 선공 플레이어에게 보너스 카드 부여
       if (firstTurnResult.firstPlayerUid == hostUid) {
         player1Captured = player1Captured.addCards(dealResult.bonusFromFloor);
-      } else {
+        print('[MatgoLogic] 보너스 카드 ${dealResult.bonusFromFloor.length}장을 player1(host)에게 부여');
+      } else if (firstTurnResult.firstPlayerUid == guestUid) {
         player2Captured = player2Captured.addCards(dealResult.bonusFromFloor);
+        print('[MatgoLogic] 보너스 카드 ${dealResult.bonusFromFloor.length}장을 player2(guest1)에게 부여');
+      } else if (guest2Uid != null && firstTurnResult.firstPlayerUid == guest2Uid) {
+        player3Captured = player3Captured.addCards(dealResult.bonusFromFloor);
+        print('[MatgoLogic] 보너스 카드 ${dealResult.bonusFromFloor.length}장을 player3(guest2)에게 부여');
+      } else {
+        print('[MatgoLogic] 경고: 보너스 카드가 있지만 선공 플레이어를 찾을 수 없음!');
       }
     }
+    
+    print('[MatgoLogic] player1Captured.pi: ${player1Captured.pi.length}장');
+    print('[MatgoLogic] player2Captured.pi: ${player2Captured.pi.length}장');
+    print('[MatgoLogic] player3Captured.pi: ${player3Captured.pi.length}장');
 
     final gameState = GameState(
       turn: firstTurnResult.firstPlayerUid,
@@ -503,19 +810,24 @@ class MatgoLogicService {
       floorCards: dealResult.floorCards,
       player1Hand: dealResult.player1Hand,
       player2Hand: dealResult.player2Hand,
+      player3Hand: dealResult.player3Hand,
       player1Captured: player1Captured,
       player2Captured: player2Captured,
+      player3Captured: player3Captured,
       scores: const ScoreInfo(),
       firstTurnPlayer: firstTurnResult.firstPlayerUid,
       firstTurnDecidingMonth: firstTurnResult.decidingMonth,
       firstTurnReason: firstTurnResult.reason,
       turnStartTime: DateTime.now().millisecondsSinceEpoch,
+      gameMode: gameMode,
+      turnOrder: turnOrder,
+      currentTurnIndex: turnOrder.indexOf(firstTurnResult.firstPlayerUid),
     );
 
     await _roomService.updateGameState(roomId: roomId, gameState: gameState);
     await _roomService.startGame(roomId);
 
-    print('[MatgoLogic] Game initialized for room: $roomId');
+    print('[MatgoLogic] Game initialized for room: $roomId, mode: ${gameMode.displayName}');
     return gameState;
   }
 
@@ -549,12 +861,41 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myHand = List<CardData>.from(
-          isPlayer1 ? current.player1Hand : current.player2Hand,
-        );
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        // 플레이어별 손패와 획득패 가져오기 (3인 고스톱 지원)
+        List<CardData> myHand;
+        CapturedCards myCaptured;
+        
+        switch (playerNumber) {
+          case 1:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+            break;
+          case 2:
+            myHand = List<CardData>.from(current.player2Hand);
+            myCaptured = current.player2Captured;
+            break;
+          case 3:
+            myHand = List<CardData>.from(current.player3Hand);
+            myCaptured = current.player3Captured;
+            break;
+          default:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+        }
+        
+        // 피 뺏기 대상 (2인: 상대방 1명 / 3인: 상대방 2명 모두)
+        final isGostopMode = current.gameMode == GameMode.gostop;
+        var opponent1Captured = playerNumber == 1 
+            ? current.player2Captured 
+            : current.player1Captured;
+        // 3인 모드에서 두 번째 상대방 (player3 또는 피 뺏기 대상이 아닌 플레이어)
+        var opponent2Captured = isGostopMode
+            ? (playerNumber == 3 
+                ? current.player2Captured  // player3이면 player2가 두 번째 상대
+                : current.player3Captured) // player1/2이면 player3이 두 번째 상대
+            : current.player1Captured;  // 2인 모드에서는 사용 안 함
+        // 하위 호환성을 위한 opponentCaptured 별칭 (기존 코드에서 사용)
+        var opponentCaptured = opponent1Captured;
         var floorCards = List<CardData>.from(current.floorCards);
         var deck = List<CardData>.from(current.deck);
         var pukCards = List<CardData>.from(current.pukCards);
@@ -569,7 +910,10 @@ class MatgoLogicService {
         int piToSteal = 0;
 
         // 光의 기운 아이템 효과 (덱에서 광 카드 우선 선택)
-        final myItemEffects = isPlayer1 ? current.player1ItemEffects : current.player2ItemEffects;
+        // 현재 player3ItemEffects는 지원하지 않음 (3인 게임에서 아이템 미지원)
+        final myItemEffects = playerNumber == 1 
+            ? current.player1ItemEffects 
+            : (playerNumber == 2 ? current.player2ItemEffects : null);
         final gwangPriorityTurns = myItemEffects?.gwangPriorityTurns ?? 0;
 
         // 바닥에서 같은 월 카드 찾기
@@ -713,18 +1057,21 @@ class MatgoLogicService {
                 handMatchCard = firstCapture[1]; // 손패로 먹은 바닥 카드
               }
 
-              // 현재 상태까지 저장하고 선택 대기 상태로 반환
+              // 현재 상태까지 저장하고 선택 대기 상태로 반환 (3인 고스톱 지원)
               return GameState(
                 turn: current.turn,
                 deck: deck,
                 floorCards: floorCards,
-                player1Hand: isPlayer1 ? myHand : List<CardData>.from(current.player1Hand),
-                player2Hand: isPlayer1 ? List<CardData>.from(current.player2Hand) : myHand,
-                player1Captured: isPlayer1 ? myCaptured : current.player1Captured,
-                player2Captured: isPlayer1 ? current.player2Captured : myCaptured,
+                player1Hand: playerNumber == 1 ? myHand : List<CardData>.from(current.player1Hand),
+                player2Hand: playerNumber == 2 ? myHand : List<CardData>.from(current.player2Hand),
+                player3Hand: playerNumber == 3 ? myHand : List<CardData>.from(current.player3Hand),
+                player1Captured: playerNumber == 1 ? myCaptured : current.player1Captured,
+                player2Captured: playerNumber == 2 ? myCaptured : current.player2Captured,
+                player3Captured: playerNumber == 3 ? myCaptured : current.player3Captured,
                 scores: scores,
                 lastEvent: event,
                 lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+                lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
                 pukCards: pukCards,
                 pukOwner: pukOwner,
                 waitingForDeckSelection: true,
@@ -738,6 +1085,9 @@ class MatgoLogicService {
                 lastItemUsed: current.lastItemUsed,
                 lastItemUsedBy: current.lastItemUsedBy,
                 lastItemUsedAt: current.lastItemUsedAt,
+                gameMode: current.gameMode,
+                turnOrder: current.turnOrder,
+                currentTurnIndex: current.currentTurnIndex,
               );
             } else if (deckMatching.length == 3) {
               // 덱 카드 3장 매칭 (설사)
@@ -767,35 +1117,80 @@ class MatgoLogicService {
           event = SpecialEvent.sweep;  // 싹쓸이 이벤트로 설정 (따닥보다 우선)
         }
 
-        // 피 뺏기
+        // 피 뺏기 (3인 모드에서는 두 상대방 모두에게서 뺏음)
         int actualPiStolen = 0;
+        List<String> piStolenFromPlayers = [];
         for (int i = 0; i < piToSteal; i++) {
-          final (newOpponent, stolenPi) = opponentCaptured.removePi();
-          if (stolenPi != null) {
-            opponentCaptured = newOpponent;
-            myCaptured = myCaptured.addCard(stolenPi);
+          // 첫 번째 상대방에게서 피 뺏기
+          final (newOpponent1, stolenPi1) = opponent1Captured.removePi();
+          if (stolenPi1 != null) {
+            opponent1Captured = newOpponent1;
+            myCaptured = myCaptured.addCard(stolenPi1);
             actualPiStolen++;
+            // 첫 번째 상대방 UID 추적
+            if (current.turnOrder.length > 1) {
+              final opponent1Uid = playerNumber == 1 ? current.turnOrder[1] : current.turnOrder[0];
+              if (!piStolenFromPlayers.contains(opponent1Uid)) {
+                piStolenFromPlayers.add(opponent1Uid);
+              }
+            }
+          }
+          
+          // 3인 모드에서는 두 번째 상대방에게서도 피 뺏기
+          if (isGostopMode && current.turnOrder.length > 2) {
+            final (newOpponent2, stolenPi2) = opponent2Captured.removePi();
+            if (stolenPi2 != null) {
+              opponent2Captured = newOpponent2;
+              myCaptured = myCaptured.addCard(stolenPi2);
+              actualPiStolen++;
+              // 두 번째 상대방 UID 추적
+              final opponent2Uid = playerNumber == 3 ? current.turnOrder[1] : current.turnOrder[2];
+              if (!piStolenFromPlayers.contains(opponent2Uid)) {
+                piStolenFromPlayers.add(opponent2Uid);
+              }
+            }
           }
         }
+        // 하위 호환성을 위해 opponentCaptured도 업데이트
+        opponentCaptured = opponent1Captured;
 
         // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
         final allCapturedCards = [...firstCapture, ...secondCapture];
         final septemberAnimal = findSeptemberAnimalCard(allCapturedCards);
         if (septemberAnimal != null) {
           print('[MatgoLogic] September animal card detected in playCard, waiting for choice');
-          // 현재 상태를 저장하고 9월 열끗 선택 대기 상태로 전환
+          // 현재 상태를 저장하고 9월 열끗 선택 대기 상태로 전환 (3인 고스톱 지원)
+          // 피 뺏기 반영된 획득패 계산
+          CapturedCards sept1Captured, sept2Captured, sept3Captured;
+          if (playerNumber == 1) {
+            sept1Captured = myCaptured;
+            sept2Captured = opponent1Captured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else if (playerNumber == 2) {
+            sept1Captured = opponent1Captured;
+            sept2Captured = myCaptured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else {
+            sept1Captured = opponent1Captured;
+            sept2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+            sept3Captured = myCaptured;
+          }
+          
           return GameState(
             turn: current.turn, // 턴 유지
             turnStartTime: DateTime.now().millisecondsSinceEpoch,
             deck: deck,
             floorCards: floorCards,
-            player1Hand: isPlayer1 ? myHand : List<CardData>.from(current.player1Hand),
-            player2Hand: isPlayer1 ? List<CardData>.from(current.player2Hand) : myHand,
-            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            player1Hand: playerNumber == 1 ? myHand : List<CardData>.from(current.player1Hand),
+            player2Hand: playerNumber == 2 ? myHand : List<CardData>.from(current.player2Hand),
+            player3Hand: playerNumber == 3 ? myHand : List<CardData>.from(current.player3Hand),
+            player1Captured: sept1Captured,
+            player2Captured: sept2Captured,
+            player3Captured: sept3Captured,
             scores: current.scores,
             lastEvent: event,
             lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
             pukCards: pukCards,
             pukOwner: pukOwner,
             waitingForSeptemberChoice: true,
@@ -806,6 +1201,9 @@ class MatgoLogicService {
             lastItemUsed: current.lastItemUsed,
             lastItemUsedBy: current.lastItemUsedBy,
             lastItemUsedAt: current.lastItemUsedAt,
+            gameMode: current.gameMode,
+            turnOrder: current.turnOrder,
+            currentTurnIndex: current.currentTurnIndex,
           );
         }
 
@@ -813,17 +1211,26 @@ class MatgoLogicService {
         final myScore = ScoreCalculator.calculateScore(myCaptured);
         final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
 
-        // Go/Stop 체크 (7점 이상)
+        // Go/Stop 체크 (승리 점수 이상이고, 점수가 실제로 올랐을 때만)
         bool waitingForGoStop = false;
         String? goStopPlayer;
 
-        if (myScore.baseTotal >= GameConstants.goStopThreshold) {
-          waitingForGoStop = true;
-          goStopPlayer = myUid;
+        // 현재 플레이어의 고 횟수와 이전 점수 확인
+        final myGoCount = _getPlayerGoCount(current.scores, playerNumber);
+        final myPrevScore = _getPlayerScore(current.scores, playerNumber);
+
+        if (myScore.baseTotal >= current.gameMode.winThreshold) {
+          // 고 선언 전이거나, 고 선언 후 점수가 올랐을 때만 Go/Stop 트리거
+          if (myGoCount == 0 || myScore.baseTotal > myPrevScore) {
+            waitingForGoStop = true;
+            goStopPlayer = myUid;
+          }
         }
 
         // 다음 턴 결정 (Go/Stop 대기 중이면 턴 유지)
-        final nextTurn = waitingForGoStop ? myUid : opponentUid;
+        final nextTurn = waitingForGoStop
+            ? myUid
+            : _getNextTurn(current.turnOrder, myUid);
 
         // 게임 종료 체크 (덱 소진 시)
         GameEndState endState = GameEndState.none;
@@ -832,10 +1239,10 @@ class MatgoLogicService {
 
         if (deck.isEmpty && myHand.isEmpty && !waitingForGoStop) {
           // 덱과 손패가 모두 소진되었을 때 게임 종료 조건 체크
-          final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
-          final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
-          final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
-          final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
+          final myGoCount = _getPlayerGoCount(scores, playerNumber);
+          final opponentGoCount = _getPlayerGoCount(scores, playerNumber == 1 ? 2 : 1);
+          final myMultiplier = _getPlayerMultiplier(scores, playerNumber);
+          final opponentMultiplier = _getPlayerMultiplier(scores, playerNumber == 1 ? 2 : 1);
 
           final endResult = checkGameEndOnExhaustion(
             myScore: myScore.baseTotal,
@@ -848,6 +1255,7 @@ class MatgoLogicService {
             opponentMultiplier: opponentMultiplier,
             myCaptured: myCaptured,
             opponentCaptured: opponentCaptured,
+            gameMode: current.gameMode,
           );
 
           endState = endResult.endState;
@@ -855,28 +1263,98 @@ class MatgoLogicService {
           finalScore = endResult.finalScore;
         }
 
+        // 플레이어별 손패 업데이트 (3인 고스톱 지원)
+        List<CardData> newPlayer1Hand = playerNumber == 1 ? myHand : List<CardData>.from(current.player1Hand);
+        List<CardData> newPlayer2Hand = playerNumber == 2 ? myHand : List<CardData>.from(current.player2Hand);
+        List<CardData> newPlayer3Hand = playerNumber == 3 ? myHand : List<CardData>.from(current.player3Hand);
+        
+        // 플레이어별 획득패 업데이트 (피 뺏기 반영)
+        // playerNumber가 현재 플레이어이고, 상대방에게서 피를 뺏었을 경우 반영
+        CapturedCards newPlayer1Captured;
+        CapturedCards newPlayer2Captured;
+        CapturedCards newPlayer3Captured;
+        
+        if (playerNumber == 1) {
+          // player1이 턴: player2, player3에게서 피 뺏음
+          newPlayer1Captured = myCaptured;
+          newPlayer2Captured = opponent1Captured;  // 첫 번째 상대 (피 뺏김)
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;  // 3인 모드시 두 번째 상대
+        } else if (playerNumber == 2) {
+          // player2가 턴: player1, player3에게서 피 뺏음
+          newPlayer1Captured = opponent1Captured;  // 첫 번째 상대 (피 뺏김)
+          newPlayer2Captured = myCaptured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;  // 3인 모드시 두 번째 상대
+        } else {
+          // player3가 턴: player1, player2에게서 피 뺏음
+          newPlayer1Captured = opponent1Captured;  // 첫 번째 상대 (피 뺏김)
+          newPlayer2Captured = isGostopMode ? opponent2Captured : current.player2Captured;  // 3인 모드시 두 번째 상대
+          newPlayer3Captured = myCaptured;
+        }
+
+        // 멍따 체크 (열끗 7장 이상)
+        final player1HasMeongTta = newPlayer1Captured.animal.length >= 7;
+        final player2HasMeongTta = newPlayer2Captured.animal.length >= 7;
+        final player3HasMeongTta = newPlayer3Captured.animal.length >= 7;
+        
+        // 새로 멍따가 된 경우 이벤트 트리거 (기존에 메인 이벤트가 없을 때만)
+        final bool wasPlayer1MeongTta = scores.player1MeongTta;
+        final bool wasPlayer2MeongTta = scores.player2MeongTta;
+        final bool wasPlayer3MeongTta = scores.player3MeongTta;
+        
+        List<CardData>? meongTtaCardsToShow;
+        String? meongTtaPlayerUid;
+        
+        if (event == SpecialEvent.none) {
+          if (playerNumber == 1 && player1HasMeongTta && !wasPlayer1MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer1Captured.animal;
+            meongTtaPlayerUid = myUid;
+          } else if (playerNumber == 2 && player2HasMeongTta && !wasPlayer2MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer2Captured.animal;
+            meongTtaPlayerUid = myUid;
+          } else if (playerNumber == 3 && player3HasMeongTta && !wasPlayer3MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer3Captured.animal;
+            meongTtaPlayerUid = myUid;
+          }
+        }
+
         // 새로운 게임 상태 반환
         return current.copyWith(
           turn: nextTurn,
+          currentTurnIndex: current.turnOrder.indexOf(nextTurn),  // 3인 모드 턴 인덱스 업데이트
           turnStartTime: DateTime.now().millisecondsSinceEpoch,  // 턴 타이머 리셋
           deck: deck,
           floorCards: floorCards,
-          player1Hand: isPlayer1 ? myHand : current.player1Hand,
-          player2Hand: isPlayer1 ? current.player2Hand : myHand,
-          player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-          player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+          player1Hand: newPlayer1Hand,
+          player2Hand: newPlayer2Hand,
+          player3Hand: newPlayer3Hand,
+          player1Captured: newPlayer1Captured,
+          player2Captured: newPlayer2Captured,
+          player3Captured: newPlayer3Captured,
           scores: ScoreInfo(
-            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
-            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
+            player1Score: playerNumber == 1 ? myScore.baseTotal : scores.player1Score,
+            player2Score: playerNumber == 2 ? myScore.baseTotal : scores.player2Score,
+            player3Score: playerNumber == 3 ? myScore.baseTotal : scores.player3Score,
             player1GoCount: scores.player1GoCount,
             player2GoCount: scores.player2GoCount,
+            player3GoCount: scores.player3GoCount,
             player1Multiplier: scores.player1Multiplier,
             player2Multiplier: scores.player2Multiplier,
+            player3Multiplier: scores.player3Multiplier,
             player1Shaking: scores.player1Shaking,
             player2Shaking: scores.player2Shaking,
+            player3Shaking: scores.player3Shaking,
+            player1MeongTta: player1HasMeongTta,
+            player2MeongTta: player2HasMeongTta,
+            player3MeongTta: player3HasMeongTta,
           ),
           lastEvent: event,
           lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+          lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
+          meongTtaCards: meongTtaCardsToShow ?? [],
+          meongTtaPlayer: meongTtaPlayerUid,
           pukCards: pukCards,
           pukOwner: pukOwner,
           endState: endState,
@@ -886,7 +1364,7 @@ class MatgoLogicService {
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           piStolenCount: actualPiStolen,
-          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
+          piStolenFromPlayers: piStolenFromPlayers,
         );
       },
     );
@@ -917,10 +1395,30 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myHand = List<CardData>.from(
-          isPlayer1 ? current.player1Hand : current.player2Hand,
-        );
+        // 3인 모드 여부 확인
+        final isGostopMode = current.gameMode == GameMode.gostop;
+        
+        // 플레이어별 손패 및 획득패 설정
+        List<CardData> myHand;
+        CapturedCards myCaptured;
+        
+        switch (playerNumber) {
+          case 1:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+            break;
+          case 2:
+            myHand = List<CardData>.from(current.player2Hand);
+            myCaptured = current.player2Captured;
+            break;
+          case 3:
+            myHand = List<CardData>.from(current.player3Hand);
+            myCaptured = current.player3Captured;
+            break;
+          default:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+        }
 
         // 손패가 비어있어야 함
         if (myHand.isNotEmpty) {
@@ -928,8 +1426,16 @@ class MatgoLogicService {
           return current;
         }
 
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        // 피 뺏기 대상 (2인: 상대방 1명 / 3인: 상대방 2명 모두)
+        var opponent1Captured = playerNumber == 1 
+            ? current.player2Captured 
+            : current.player1Captured;
+        var opponent2Captured = isGostopMode
+            ? (playerNumber == 3 
+                ? current.player2Captured 
+                : current.player3Captured)
+            : current.player1Captured;
+        var opponentCaptured = opponent1Captured;
         var floorCards = List<CardData>.from(current.floorCards);
         var deck = List<CardData>.from(current.deck);
         var pukCards = List<CardData>.from(current.pukCards);
@@ -941,7 +1447,12 @@ class MatgoLogicService {
         int piToSteal = 0;
 
         // 光의 기운 아이템 효과 (덱에서 광 카드 우선 선택)
-        final myItemEffects = isPlayer1 ? current.player1ItemEffects : current.player2ItemEffects;
+        final myItemEffects = switch (playerNumber) {
+          1 => current.player1ItemEffects,
+          2 => current.player2ItemEffects,
+          3 => current.player3ItemEffects,
+          _ => current.player1ItemEffects,
+        };
         final gwangPriorityTurns = myItemEffects?.gwangPriorityTurns ?? 0;
 
         // 덱에서 카드 뒤집기
@@ -1021,21 +1532,60 @@ class MatgoLogicService {
           event = SpecialEvent.sweep;
         }
 
-        // 피 뺏기
+        // 피 뺏기 (3인 모드에서는 두 상대방 모두에게서 뺏음)
         int actualPiStolen = 0;
+        List<String> piStolenFromPlayers = [];
         for (int i = 0; i < piToSteal; i++) {
-          final (newOpponent, stolenPi) = opponentCaptured.removePi();
-          if (stolenPi != null) {
-            opponentCaptured = newOpponent;
-            myCaptured = myCaptured.addCard(stolenPi);
+          // 첫 번째 상대방에게서 피 뺏기
+          final (newOpponent1, stolenPi1) = opponent1Captured.removePi();
+          if (stolenPi1 != null) {
+            opponent1Captured = newOpponent1;
+            myCaptured = myCaptured.addCard(stolenPi1);
             actualPiStolen++;
+            if (current.turnOrder.length > 1) {
+              final opponent1Uid = playerNumber == 1 ? current.turnOrder[1] : current.turnOrder[0];
+              if (!piStolenFromPlayers.contains(opponent1Uid)) {
+                piStolenFromPlayers.add(opponent1Uid);
+              }
+            }
+          }
+          
+          // 3인 모드에서는 두 번째 상대방에게서도 피 뺏기
+          if (isGostopMode && current.turnOrder.length > 2) {
+            final (newOpponent2, stolenPi2) = opponent2Captured.removePi();
+            if (stolenPi2 != null) {
+              opponent2Captured = newOpponent2;
+              myCaptured = myCaptured.addCard(stolenPi2);
+              actualPiStolen++;
+              final opponent2Uid = playerNumber == 3 ? current.turnOrder[1] : current.turnOrder[2];
+              if (!piStolenFromPlayers.contains(opponent2Uid)) {
+                piStolenFromPlayers.add(opponent2Uid);
+              }
+            }
           }
         }
+        opponentCaptured = opponent1Captured;
 
         // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
         final septemberAnimalFlip = findSeptemberAnimalCard(capture);
         if (septemberAnimalFlip != null) {
           print('[MatgoLogic] September animal card detected in flipDeckOnly, waiting for choice');
+          // 피 뺏기 반영된 획득패 계산
+          CapturedCards sept1Captured, sept2Captured, sept3Captured;
+          if (playerNumber == 1) {
+            sept1Captured = myCaptured;
+            sept2Captured = opponent1Captured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else if (playerNumber == 2) {
+            sept1Captured = opponent1Captured;
+            sept2Captured = myCaptured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else {
+            sept1Captured = opponent1Captured;
+            sept2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+            sept3Captured = myCaptured;
+          }
+          
           return GameState(
             turn: current.turn,
             turnStartTime: DateTime.now().millisecondsSinceEpoch,
@@ -1043,11 +1593,14 @@ class MatgoLogicService {
             floorCards: floorCards,
             player1Hand: current.player1Hand,
             player2Hand: current.player2Hand,
-            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            player3Hand: current.player3Hand,
+            player1Captured: sept1Captured,
+            player2Captured: sept2Captured,
+            player3Captured: sept3Captured,
             scores: current.scores,
             lastEvent: event,
             lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
             pukCards: pukCards,
             pukOwner: pukOwner,
             waitingForSeptemberChoice: true,
@@ -1058,6 +1611,9 @@ class MatgoLogicService {
             lastItemUsed: current.lastItemUsed,
             lastItemUsedBy: current.lastItemUsedBy,
             lastItemUsedAt: current.lastItemUsedAt,
+            gameMode: current.gameMode,
+            turnOrder: current.turnOrder,
+            currentTurnIndex: current.currentTurnIndex,
           );
         }
 
@@ -1065,73 +1621,177 @@ class MatgoLogicService {
         final myScore = ScoreCalculator.calculateScore(myCaptured);
         final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
 
-        // Go/Stop 체크 (7점 이상)
+        // Go/Stop 체크 (승리 점수 이상이고, 점수가 실제로 올랐을 때만)
         bool waitingForGoStop = false;
         String? goStopPlayer;
 
-        if (myScore.baseTotal >= GameConstants.goStopThreshold) {
-          waitingForGoStop = true;
-          goStopPlayer = myUid;
+        // 현재 플레이어의 고 횟수와 이전 점수 확인
+        final myGoCountFlip = _getPlayerGoCount(current.scores, playerNumber);
+        final myPrevScoreFlip = _getPlayerScore(current.scores, playerNumber);
+
+        if (myScore.baseTotal >= current.gameMode.winThreshold) {
+          // 고 선언 전이거나, 고 선언 후 점수가 올랐을 때만 Go/Stop 트리거
+          if (myGoCountFlip == 0 || myScore.baseTotal > myPrevScoreFlip) {
+            waitingForGoStop = true;
+            goStopPlayer = myUid;
+          }
         }
 
-        // 다음 턴 결정
-        final nextTurn = waitingForGoStop ? myUid : opponentUid;
+        // 다음 턴 결정 (Go/Stop 대기 중이면 턴 유지)
+        final nextTurn = waitingForGoStop
+            ? myUid
+            : _getNextTurn(current.turnOrder, myUid);
 
         // 게임 종료 체크 (덱 소진 시)
-        final opponentHand = isPlayer1 ? current.player2Hand : current.player1Hand;
         GameEndState endState = GameEndState.none;
         String? winner;
         int finalScore = 0;
 
-        if (deck.isEmpty && !waitingForGoStop) {
-          // 덱이 소진되었을 때 게임 종료 조건 체크
-          final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
-          final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
-          final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
-          final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
+        // 모든 플레이어의 손패가 비었는지 확인
+        final allHandsEmpty = current.player1Hand.isEmpty &&
+            current.player2Hand.isEmpty &&
+            (!isGostopMode || current.player3Hand.isEmpty);
 
-          final endResult = checkGameEndOnExhaustion(
-            myScore: myScore.baseTotal,
-            opponentScore: opponentScore.baseTotal,
-            myGoCount: myGoCount,
-            opponentGoCount: opponentGoCount,
-            myUid: myUid,
-            opponentUid: opponentUid,
-            myMultiplier: myMultiplier,
-            opponentMultiplier: opponentMultiplier,
-            myCaptured: myCaptured,
-            opponentCaptured: opponentCaptured,
-          );
+        // 덱 소진 시 게임 종료 체크
+        if (deck.isEmpty && allHandsEmpty && !waitingForGoStop) {
+          if (isGostopMode) {
+            // 3인 고스톱 모드: 점수 비교로 승자 결정 (고박 없음)
+            final player1Score = ScoreCalculator.calculateScore(
+              playerNumber == 1 ? myCaptured : opponent1Captured
+            ).baseTotal;
+            final player2Score = ScoreCalculator.calculateScore(
+              playerNumber == 2 ? myCaptured : (playerNumber == 1 ? opponent1Captured : opponent2Captured)
+            ).baseTotal;
+            final player3Score = ScoreCalculator.calculateScore(
+              playerNumber == 3 ? myCaptured : opponent2Captured
+            ).baseTotal;
+            
+            final playerScores = [
+              (uid: current.turnOrder.isNotEmpty ? current.turnOrder[0] : myUid, score: player1Score),
+              (uid: current.turnOrder.length > 1 ? current.turnOrder[1] : opponentUid, score: player2Score),
+              (uid: current.turnOrder.length > 2 ? current.turnOrder[2] : '', score: player3Score),
+            ];
+            
+            final endResult = checkGameEndOnExhaustion3P(
+              playerScores: playerScores,
+              gameMode: current.gameMode,
+            );
+            
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+          } else {
+            // 2인 맞고 모드: 기존 로직 (고박 포함)
+            final isPlayer1 = playerNumber == 1;
+            final opponentScoreResult = ScoreCalculator.calculateScore(opponent1Captured);
+            
+            final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
+            final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
+            final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
+            final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
 
-          endState = endResult.endState;
-          winner = endResult.winner;
-          finalScore = endResult.finalScore;
+            final endResult = checkGameEndOnExhaustion(
+              myScore: myScore.baseTotal,
+              opponentScore: opponentScoreResult.baseTotal,
+              myGoCount: myGoCount,
+              opponentGoCount: opponentGoCount,
+              myUid: myUid,
+              opponentUid: opponentUid,
+              myMultiplier: myMultiplier,
+              opponentMultiplier: opponentMultiplier,
+              myCaptured: myCaptured,
+              opponentCaptured: opponent1Captured,
+              gameMode: current.gameMode,
+            );
+
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+          }
         }
 
         print('[MatgoLogic] flipDeckOnly: 덱 카드 뒤집기 완료 - event: $event, capture: ${capture.length}장');
 
+        // 플레이어별 획득패 업데이트 (피 뺏기 반영)
+        CapturedCards newPlayer1Captured, newPlayer2Captured, newPlayer3Captured;
+        if (playerNumber == 1) {
+          newPlayer1Captured = myCaptured;
+          newPlayer2Captured = opponent1Captured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else if (playerNumber == 2) {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = myCaptured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+          newPlayer3Captured = myCaptured;
+        }
+
+        // 멍따 체크 (열끗 7장 이상)
+        final player1HasMeongTta = newPlayer1Captured.animal.length >= 7;
+        final player2HasMeongTta = newPlayer2Captured.animal.length >= 7;
+        final player3HasMeongTta = newPlayer3Captured.animal.length >= 7;
+        
+        // 새로 멍따가 된 경우 이벤트 트리거 (기존에 메인 이벤트가 없을 때만)
+        final bool wasPlayer1MeongTta = scores.player1MeongTta;
+        final bool wasPlayer2MeongTta = scores.player2MeongTta;
+        final bool wasPlayer3MeongTta = scores.player3MeongTta;
+        
+        List<CardData>? meongTtaCardsToShow;
+        String? meongTtaPlayerUid;
+        
+        if (event == SpecialEvent.none) {
+          if (playerNumber == 1 && player1HasMeongTta && !wasPlayer1MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer1Captured.animal;
+            meongTtaPlayerUid = myUid;
+          } else if (playerNumber == 2 && player2HasMeongTta && !wasPlayer2MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer2Captured.animal;
+            meongTtaPlayerUid = myUid;
+          } else if (playerNumber == 3 && player3HasMeongTta && !wasPlayer3MeongTta) {
+            event = SpecialEvent.meongTta;
+            meongTtaCardsToShow = newPlayer3Captured.animal;
+            meongTtaPlayerUid = myUid;
+          }
+        }
+
         // 새로운 게임 상태 반환
         return current.copyWith(
           turn: nextTurn,
+          currentTurnIndex: current.turnOrder.indexOf(nextTurn),  // 3인 모드 턴 인덱스 업데이트
           turnStartTime: DateTime.now().millisecondsSinceEpoch,  // 턴 타이머 리셋
           deck: deck,
           floorCards: floorCards,
           player1Hand: current.player1Hand,
           player2Hand: current.player2Hand,
-          player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-          player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+          player3Hand: current.player3Hand,
+          player1Captured: newPlayer1Captured,
+          player2Captured: newPlayer2Captured,
+          player3Captured: newPlayer3Captured,
           scores: ScoreInfo(
-            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
-            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
+            player1Score: playerNumber == 1 ? myScore.baseTotal : scores.player1Score,
+            player2Score: playerNumber == 2 ? myScore.baseTotal : scores.player2Score,
+            player3Score: playerNumber == 3 ? myScore.baseTotal : scores.player3Score,
             player1GoCount: scores.player1GoCount,
             player2GoCount: scores.player2GoCount,
+            player3GoCount: scores.player3GoCount,
             player1Multiplier: scores.player1Multiplier,
             player2Multiplier: scores.player2Multiplier,
+            player3Multiplier: scores.player3Multiplier,
             player1Shaking: scores.player1Shaking,
             player2Shaking: scores.player2Shaking,
+            player3Shaking: scores.player3Shaking,
+            player1MeongTta: player1HasMeongTta,
+            player2MeongTta: player2HasMeongTta,
+            player3MeongTta: player3HasMeongTta,
           ),
           lastEvent: event,
           lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+          lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
+          meongTtaCards: meongTtaCardsToShow ?? [],
+          meongTtaPlayer: meongTtaPlayerUid,
           pukCards: pukCards,
           pukOwner: pukOwner,
           endState: endState,
@@ -1141,13 +1801,13 @@ class MatgoLogicService {
           waitingForGoStop: waitingForGoStop,
           goStopPlayer: goStopPlayer,
           piStolenCount: actualPiStolen,
-          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
+          piStolenFromPlayers: piStolenFromPlayers,
         );
       },
     );
   }
 
-  /// Go 선언
+  /// Go 선언 (3인 고스톱 모드 지원)
   Future<bool> declareGo({
     required String roomId,
     required String myUid,
@@ -1161,26 +1821,48 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        final currentGoCount = isPlayer1
-            ? current.scores.player1GoCount
-            : current.scores.player2GoCount;
+        final isGostopMode = current.gameMode == GameMode.gostop;
+
+        // 3인 고스톱 모드 지원: playerNumber에 따라 올바른 고 횟수 선택
+        final currentGoCount = switch (playerNumber) {
+          1 => current.scores.player1GoCount,
+          2 => current.scores.player2GoCount,
+          3 => current.scores.player3GoCount,
+          _ => current.scores.player1GoCount,
+        };
         final newGoCount = currentGoCount + 1;
 
-        // 양쪽 손패가 모두 비었는지 확인
-        final bothHandsEmpty = current.player1Hand.isEmpty && current.player2Hand.isEmpty;
+        // 모든 플레이어 손패가 비었는지 확인 (3인 고스톱 모드 지원)
+        final allHandsEmpty = current.player1Hand.isEmpty &&
+            current.player2Hand.isEmpty &&
+            (!isGostopMode || current.player3Hand.isEmpty);
 
         // 덱도 비었는지 확인
         final deckEmpty = current.deck.isEmpty;
 
         // 손패와 덱이 모두 비었으면 더 이상 진행 불가 → 고 선언자 승리
-        if (bothHandsEmpty && deckEmpty) {
-          final myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-          final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        if (allHandsEmpty && deckEmpty) {
+          // 3인 고스톱 모드 지원: playerNumber에 따라 올바른 획득패 선택
+          final myCaptured = switch (playerNumber) {
+            1 => current.player1Captured,
+            2 => current.player2Captured,
+            3 => current.player3Captured,
+            _ => current.player1Captured,
+          };
+          // 점수 계산을 위한 대표 상대 획득패 (첫 번째 상대)
+          final opponentCaptured = switch (playerNumber) {
+            1 => current.player2Captured,
+            2 => current.player1Captured,
+            3 => current.player1Captured,
+            _ => current.player2Captured,
+          };
 
-          final playerMultiplier = isPlayer1
-              ? current.scores.player1Multiplier
-              : current.scores.player2Multiplier;
+          final playerMultiplier = switch (playerNumber) {
+            1 => current.scores.player1Multiplier,
+            2 => current.scores.player2Multiplier,
+            3 => current.scores.player3Multiplier,
+            _ => current.scores.player1Multiplier,
+          };
 
           // 최종 점수 계산 (고 횟수 반영)
           final finalResult = ScoreCalculator.calculateFinalScore(
@@ -1188,14 +1870,16 @@ class MatgoLogicService {
             opponentCaptures: opponentCaptured,
             goCount: newGoCount,
             playerMultiplier: playerMultiplier,
+            gameMode: current.gameMode,
           );
 
           return current.copyWith(
             waitingForGoStop: false,
             clearGoStopPlayer: true,
             scores: current.scores.copyWith(
-              player1GoCount: isPlayer1 ? newGoCount : null,
-              player2GoCount: isPlayer1 ? null : newGoCount,
+              player1GoCount: playerNumber == 1 ? newGoCount : null,
+              player2GoCount: playerNumber == 2 ? newGoCount : null,
+              player3GoCount: playerNumber == 3 ? newGoCount : null,
             ),
             endState: GameEndState.win,
             winner: myUid,
@@ -1204,21 +1888,27 @@ class MatgoLogicService {
         }
 
         // 정상적인 경우: 턴을 넘기고 게임 계속
+        // 3인 고스톱 모드: turnOrder 기반 다음 턴 결정
+        final nextTurn = _getNextTurn(current.turnOrder, myUid);
+        final nextTurnIndex = current.turnOrder.indexOf(nextTurn);
+
         return current.copyWith(
-          turn: opponentUid,  // 턴 넘기기
-          turnStartTime: DateTime.now().millisecondsSinceEpoch,  // 턴 타이머 리셋
+          turn: nextTurn,
+          currentTurnIndex: nextTurnIndex >= 0 ? nextTurnIndex : current.currentTurnIndex,
+          turnStartTime: DateTime.now().millisecondsSinceEpoch,
           waitingForGoStop: false,
           clearGoStopPlayer: true,
           scores: current.scores.copyWith(
-            player1GoCount: isPlayer1 ? newGoCount : null,
-            player2GoCount: isPlayer1 ? null : newGoCount,
+            player1GoCount: playerNumber == 1 ? newGoCount : null,
+            player2GoCount: playerNumber == 2 ? newGoCount : null,
+            player3GoCount: playerNumber == 3 ? newGoCount : null,
           ),
         );
       },
     );
   }
 
-  /// Stop 선언 (게임 종료)
+  /// Stop 선언 (게임 종료) - 3인 고스톱 모드 지원
   Future<bool> declareStop({
     required String roomId,
     required String myUid,
@@ -1231,22 +1921,42 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        final myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        // 3인 고스톱 모드 지원: playerNumber에 따라 올바른 획득패 선택
+        final myCaptured = switch (playerNumber) {
+          1 => current.player1Captured,
+          2 => current.player2Captured,
+          3 => current.player3Captured,
+          _ => current.player1Captured,
+        };
+        // 점수 계산을 위한 대표 상대 획득패 (첫 번째 상대)
+        final opponentCaptured = switch (playerNumber) {
+          1 => current.player2Captured,
+          2 => current.player1Captured,
+          3 => current.player1Captured,
+          _ => current.player2Captured,
+        };
 
-        // 고 횟수와 플레이어 배수
-        final goCount = isPlayer1
-            ? current.scores.player1GoCount
-            : current.scores.player2GoCount;
-        final playerMultiplier = isPlayer1
-            ? current.scores.player1Multiplier
-            : current.scores.player2Multiplier;
+        // 3인 고스톱 모드 지원: 고 횟수와 플레이어 배수
+        final goCount = switch (playerNumber) {
+          1 => current.scores.player1GoCount,
+          2 => current.scores.player2GoCount,
+          3 => current.scores.player3GoCount,
+          _ => current.scores.player1GoCount,
+        };
+        final playerMultiplier = switch (playerNumber) {
+          1 => current.scores.player1Multiplier,
+          2 => current.scores.player2Multiplier,
+          3 => current.scores.player3Multiplier,
+          _ => current.scores.player1Multiplier,
+        };
 
-        // 상대방 고 횟수 확인 (고박 체크용)
-        final opponentGoCount = isPlayer1
-            ? current.scores.player2GoCount
-            : current.scores.player1GoCount;
+        // 상대방 고 횟수 확인 (고박 체크용) - 3인 모드에서는 다른 플레이어들 중 최대 고 횟수
+        final opponentGoCount = switch (playerNumber) {
+          1 => [current.scores.player2GoCount, current.scores.player3GoCount].reduce((a, b) => a > b ? a : b),
+          2 => [current.scores.player1GoCount, current.scores.player3GoCount].reduce((a, b) => a > b ? a : b),
+          3 => [current.scores.player1GoCount, current.scores.player2GoCount].reduce((a, b) => a > b ? a : b),
+          _ => current.scores.player2GoCount,
+        };
 
         // 고박 여부: 상대방이 고를 선언한 상태에서 내가 스톱으로 역전 승리
         final isGobak = opponentGoCount > 0;
@@ -1258,6 +1968,7 @@ class MatgoLogicService {
           goCount: goCount,
           playerMultiplier: playerMultiplier,
           isGobak: isGobak,
+          gameMode: current.gameMode,
         );
 
         return current.copyWith(
@@ -1273,10 +1984,11 @@ class MatgoLogicService {
   }
 
   /// 덱 카드 선택 완료 (더미 패 뒤집기 시 2장 매칭 선택)
+  /// 2인/3인 모드 모두 지원
   Future<bool> selectDeckMatchCard({
     required String roomId,
     required String myUid,
-    required String opponentUid,
+    required String opponentUid,  // 2인 모드에서 사용, 3인 모드에서는 turnOrder로 대체
     required int playerNumber,
     required CardData selectedFloorCard,  // 선택한 바닥 카드
   }) async {
@@ -1295,9 +2007,27 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        // 3인 고스톱 모드 여부 확인
+        final isGostopMode = current.gameMode == GameMode.gostop;
+
+        // 플레이어별 획득패 설정 (3인 모드 지원)
+        var myCaptured = switch (playerNumber) {
+          1 => current.player1Captured,
+          2 => current.player2Captured,
+          3 => current.player3Captured,
+          _ => current.player1Captured,
+        };
+
+        // 상대방 획득패 설정 (피 뺏기용)
+        var opponent1Captured = playerNumber == 1
+            ? current.player2Captured
+            : current.player1Captured;
+        var opponent2Captured = isGostopMode
+            ? (playerNumber == 3
+                ? current.player2Captured
+                : current.player3Captured)
+            : const CapturedCards();
+
         var floorCards = List<CardData>.from(current.floorCards);
         var scores = current.scores;
 
@@ -1314,7 +2044,6 @@ class MatgoLogicService {
         floorCards.removeWhere((c) => c.id == selectedFloorCard.id);
 
         // 따닥 체크: 4장 모두 같은 월이어야 함
-        // 손패로 먹은 카드(pendingHandCard)와 덱 카드(deckCard)가 같은 월인지 확인
         SpecialEvent event = SpecialEvent.none;
         int piToSteal = 0;
         if (firstMatched &&
@@ -1329,28 +2058,70 @@ class MatgoLogicService {
         myCaptured = myCaptured.addCards(secondCapture);
 
         // 싹쓸이 체크
-        // 싹쓸이는 다른 이벤트와 동시에 발생할 수 있으므로 덮어씀
         if (floorCards.isEmpty && (firstCapture.isNotEmpty || secondCapture.isNotEmpty)) {
           piToSteal += 1;
           event = SpecialEvent.sweep;
         }
 
-        // 피 뺏기
+        // 피 뺏기 (3인 모드: 2명의 상대방에게서 뺏음)
         int actualPiStolen = 0;
+        final List<String> piStolenFromPlayers = [];
+        
+        // 상대방1 UID 결정
+        final opponent1Uid = playerNumber == 1
+            ? current.turnOrder.length > 1 ? current.turnOrder[1] : opponentUid
+            : current.turnOrder.isNotEmpty ? current.turnOrder[0] : opponentUid;
+        // 상대방2 UID 결정 (3인 모드)
+        final opponent2Uid = isGostopMode && current.turnOrder.length > 2
+            ? (playerNumber == 3 ? current.turnOrder[1] : current.turnOrder[2])
+            : '';
+
         for (int i = 0; i < piToSteal; i++) {
-          final (newOpponent, stolenPi) = opponentCaptured.removePi();
-          if (stolenPi != null) {
-            opponentCaptured = newOpponent;
-            myCaptured = myCaptured.addCard(stolenPi);
+          // 첫 번째 상대에게서 피 뺏기
+          final (newOpponent1, stolenPi1) = opponent1Captured.removePi();
+          if (stolenPi1 != null) {
+            opponent1Captured = newOpponent1;
+            myCaptured = myCaptured.addCard(stolenPi1);
             actualPiStolen++;
+            if (!piStolenFromPlayers.contains(opponent1Uid)) {
+              piStolenFromPlayers.add(opponent1Uid);
+            }
+          } else if (isGostopMode) {
+            // 3인 모드: 첫 번째 상대에게 피가 없으면 두 번째 상대에게서
+            final (newOpponent2, stolenPi2) = opponent2Captured.removePi();
+            if (stolenPi2 != null) {
+              opponent2Captured = newOpponent2;
+              myCaptured = myCaptured.addCard(stolenPi2);
+              actualPiStolen++;
+              if (!piStolenFromPlayers.contains(opponent2Uid)) {
+                piStolenFromPlayers.add(opponent2Uid);
+              }
+            }
           }
         }
 
-        // 9월 열끗 선택 체크: 획득 카드 중 9월 열끗이 있으면 선택 대기
+        // 9월 열끗 선택 체크
         final allCapturedDeck = [...firstCapture, ...secondCapture];
         final septemberAnimalDeck = findSeptemberAnimalCard(allCapturedDeck);
         if (septemberAnimalDeck != null) {
           print('[MatgoLogic] September animal card detected in selectDeckMatchCard, waiting for choice');
+          
+          // 플레이어별 획득패 업데이트 (피 뺏기 반영)
+          CapturedCards sept1Captured, sept2Captured, sept3Captured;
+          if (playerNumber == 1) {
+            sept1Captured = myCaptured;
+            sept2Captured = opponent1Captured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else if (playerNumber == 2) {
+            sept1Captured = opponent1Captured;
+            sept2Captured = myCaptured;
+            sept3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+          } else {
+            sept1Captured = opponent1Captured;
+            sept2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+            sept3Captured = myCaptured;
+          }
+          
           return GameState(
             turn: current.turn,
             turnStartTime: DateTime.now().millisecondsSinceEpoch,
@@ -1358,11 +2129,14 @@ class MatgoLogicService {
             floorCards: floorCards,
             player1Hand: current.player1Hand,
             player2Hand: current.player2Hand,
-            player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-            player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+            player3Hand: current.player3Hand,
+            player1Captured: sept1Captured,
+            player2Captured: sept2Captured,
+            player3Captured: sept3Captured,
             scores: current.scores,
             lastEvent: event,
             lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+            lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
             pukCards: current.pukCards,
             pukOwner: current.pukOwner,
             waitingForDeckSelection: false,
@@ -1374,8 +2148,12 @@ class MatgoLogicService {
             waitingForSeptemberChoice: true,
             septemberChoicePlayer: myUid,
             pendingSeptemberCard: septemberAnimalDeck,
+            gameMode: current.gameMode,
+            turnOrder: current.turnOrder,
+            currentTurnIndex: current.currentTurnIndex,
             player1ItemEffects: current.player1ItemEffects,
             player2ItemEffects: current.player2ItemEffects,
+            player3ItemEffects: current.player3ItemEffects,
             lastItemUsed: current.lastItemUsed,
             lastItemUsedBy: current.lastItemUsedBy,
             lastItemUsedAt: current.lastItemUsedAt,
@@ -1384,16 +2162,27 @@ class MatgoLogicService {
 
         // 점수 계산
         final myScore = ScoreCalculator.calculateScore(myCaptured);
-        final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
 
-        // Go/Stop 체크
+        // Go/Stop 체크 (승리 점수 이상이고, 점수가 실제로 올랐을 때만)
         bool waitingForGoStop = false;
         String? goStopPlayer;
 
-        if (myScore.baseTotal >= GameConstants.goStopThreshold) {
-          waitingForGoStop = true;
-          goStopPlayer = myUid;
+        // 현재 플레이어의 고 횟수와 이전 점수 확인
+        final myGoCountDeck = _getPlayerGoCount(current.scores, playerNumber);
+        final myPrevScoreDeck = _getPlayerScore(current.scores, playerNumber);
+
+        if (myScore.baseTotal >= current.gameMode.winThreshold) {
+          // 고 선언 전이거나, 고 선언 후 점수가 올랐을 때만 Go/Stop 트리거
+          if (myGoCountDeck == 0 || myScore.baseTotal > myPrevScoreDeck) {
+            waitingForGoStop = true;
+            goStopPlayer = myUid;
+          }
         }
+
+        // 다음 턴 결정 (Go/Stop 대기 중이면 턴 유지)
+        final nextTurn = waitingForGoStop
+            ? myUid
+            : _getNextTurn(current.turnOrder, myUid);
 
         // 게임 종료 체크 (덱 소진 시)
         GameEndState endState = GameEndState.none;
@@ -1401,55 +2190,101 @@ class MatgoLogicService {
         int finalScore = 0;
         bool isGobak = false;
 
-        final myHandEmpty = isPlayer1
-            ? current.player1Hand.isEmpty
-            : current.player2Hand.isEmpty;
-        final opponentHandEmpty = isPlayer1
-            ? current.player2Hand.isEmpty
-            : current.player1Hand.isEmpty;
+        // 모든 플레이어의 손패가 비었는지 확인
+        final allHandsEmpty = current.player1Hand.isEmpty &&
+            current.player2Hand.isEmpty &&
+            (!isGostopMode || current.player3Hand.isEmpty);
 
-        if (current.deck.isEmpty && myHandEmpty && opponentHandEmpty && !waitingForGoStop) {
-          // 덱과 손패가 모두 소진되었을 때 게임 종료 조건 체크
-          final scores = current.scores;
-          final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
-          final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
-          final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
-          final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
+        if (current.deck.isEmpty && allHandsEmpty && !waitingForGoStop) {
+          if (isGostopMode) {
+            // 3인 고스톱 모드: 점수 비교로 승자 결정
+            final player1Score = ScoreCalculator.calculateScore(current.player1Captured).baseTotal;
+            final player2Score = ScoreCalculator.calculateScore(current.player2Captured).baseTotal;
+            final player3Score = ScoreCalculator.calculateScore(current.player3Captured).baseTotal;
+            
+            // 내 점수는 피 뺏기가 반영된 myCaptured로 계산
+            final myFinalScore = myScore.baseTotal;
+            final scores = [
+              (uid: current.turnOrder.isNotEmpty ? current.turnOrder[0] : myUid, score: playerNumber == 1 ? myFinalScore : player1Score),
+              (uid: current.turnOrder.length > 1 ? current.turnOrder[1] : opponentUid, score: playerNumber == 2 ? myFinalScore : player2Score),
+              (uid: current.turnOrder.length > 2 ? current.turnOrder[2] : '', score: playerNumber == 3 ? myFinalScore : player3Score),
+            ];
+            
+            final endResult = checkGameEndOnExhaustion3P(
+              playerScores: scores,
+              gameMode: current.gameMode,
+            );
+            
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+          } else {
+            // 2인 맞고 모드: 기존 로직
+            final opponentScore = ScoreCalculator.calculateScore(opponent1Captured);
+            final myGoCount = _getPlayerGoCount(scores, playerNumber);
+            final opponentGoCount = _getPlayerGoCount(scores, playerNumber == 1 ? 2 : 1);
+            final myMultiplier = _getPlayerMultiplier(scores, playerNumber);
+            final opponentMultiplier = _getPlayerMultiplier(scores, playerNumber == 1 ? 2 : 1);
 
-          final endResult = checkGameEndOnExhaustion(
-            myScore: myScore.baseTotal,
-            opponentScore: opponentScore.baseTotal,
-            myGoCount: myGoCount,
-            opponentGoCount: opponentGoCount,
-            myUid: myUid,
-            opponentUid: opponentUid,
-            myMultiplier: myMultiplier,
-            opponentMultiplier: opponentMultiplier,
-            myCaptured: myCaptured,
-            opponentCaptured: opponentCaptured,
-          );
+            final endResult = checkGameEndOnExhaustion(
+              myScore: myScore.baseTotal,
+              opponentScore: opponentScore.baseTotal,
+              myGoCount: myGoCount,
+              opponentGoCount: opponentGoCount,
+              myUid: myUid,
+              opponentUid: opponentUid,
+              myMultiplier: myMultiplier,
+              opponentMultiplier: opponentMultiplier,
+              myCaptured: myCaptured,
+              opponentCaptured: opponent1Captured,
+              gameMode: current.gameMode,
+            );
 
-          endState = endResult.endState;
-          winner = endResult.winner;
-          finalScore = endResult.finalScore;
-          isGobak = endResult.isGobak;
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+            isGobak = endResult.isGobak;
+          }
         }
 
+        // 플레이어별 획득패 업데이트 (피 뺏기 반영)
+        CapturedCards newPlayer1Captured, newPlayer2Captured, newPlayer3Captured;
+        if (playerNumber == 1) {
+          newPlayer1Captured = myCaptured;
+          newPlayer2Captured = opponent1Captured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else if (playerNumber == 2) {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = myCaptured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+          newPlayer3Captured = myCaptured;
+        }
+
+        // 점수 업데이트
+        final newScores = scores.copyWith(
+          player1Score: playerNumber == 1 ? myScore.baseTotal : ScoreCalculator.calculateScore(newPlayer1Captured).baseTotal,
+          player2Score: playerNumber == 2 ? myScore.baseTotal : ScoreCalculator.calculateScore(newPlayer2Captured).baseTotal,
+          player3Score: isGostopMode && playerNumber == 3 ? myScore.baseTotal : (isGostopMode ? ScoreCalculator.calculateScore(newPlayer3Captured).baseTotal : scores.player3Score),
+        );
+
         return GameState(
-          turn: waitingForGoStop ? myUid : opponentUid,
-          turnStartTime: DateTime.now().millisecondsSinceEpoch,  // 턴 타이머 리셋
+          turn: waitingForGoStop ? myUid : nextTurn,
+          turnStartTime: DateTime.now().millisecondsSinceEpoch,
           deck: current.deck,
           floorCards: floorCards,
           player1Hand: current.player1Hand,
           player2Hand: current.player2Hand,
-          player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-          player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
-          scores: scores.copyWith(
-            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
-            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
-          ),
+          player3Hand: current.player3Hand,
+          player1Captured: newPlayer1Captured,
+          player2Captured: newPlayer2Captured,
+          player3Captured: newPlayer3Captured,
+          scores: newScores,
           lastEvent: event,
           lastEventPlayer: event != SpecialEvent.none ? myUid : null,
+          lastEventAt: event != SpecialEvent.none ? DateTime.now().millisecondsSinceEpoch : null,
           pukCards: current.pukCards,
           pukOwner: current.pukOwner,
           endState: endState,
@@ -1465,9 +2300,13 @@ class MatgoLogicService {
           pendingHandCard: null,
           pendingHandMatch: null,
           piStolenCount: actualPiStolen,
-          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
+          piStolenFromPlayers: piStolenFromPlayers,
+          gameMode: current.gameMode,
+          turnOrder: current.turnOrder,
+          currentTurnIndex: current.currentTurnIndex,
           player1ItemEffects: current.player1ItemEffects,
           player2ItemEffects: current.player2ItemEffects,
+          player3ItemEffects: current.player3ItemEffects,
           lastItemUsed: current.lastItemUsed,
           lastItemUsedBy: current.lastItemUsedBy,
           lastItemUsedAt: current.lastItemUsedAt,
@@ -1477,6 +2316,7 @@ class MatgoLogicService {
   }
 
   /// 흔들기 선언
+  /// 흔들기 선언 (2인/3인 모드 모두 지원)
   Future<bool> declareShake({
     required String roomId,
     required String myUid,
@@ -1490,8 +2330,13 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
+        // 플레이어 번호에 따른 손패 선택
+        final myHand = switch (playerNumber) {
+          1 => current.player1Hand,
+          2 => current.player2Hand,
+          3 => current.player3Hand,
+          _ => current.player1Hand,
+        };
 
         // 해당 월 카드가 3장 있는지 확인
         final monthCards = myHand.where((c) => c.month == month).toList();
@@ -1499,17 +2344,20 @@ class MatgoLogicService {
           return current;
         }
 
-        // 흔들기 적용 (배수 2배) - 양쪽 플레이어에게 카드 공개
+        // 흔들기 적용 (배수 2배) - 모든 플레이어에게 카드 공개
         return current.copyWith(
           lastEvent: SpecialEvent.shake,
           lastEventPlayer: myUid,
-          shakeCards: monthCards,  // 흔들기 카드 공개 (양쪽 모두 볼 수 있음)
+          lastEventAt: DateTime.now().millisecondsSinceEpoch,
+          shakeCards: monthCards,  // 흔들기 카드 공개 (모든 플레이어 볼 수 있음)
           shakePlayer: myUid,
           scores: current.scores.copyWith(
-            player1Multiplier: isPlayer1 ? current.scores.player1Multiplier * 2 : null,
-            player2Multiplier: isPlayer1 ? null : current.scores.player2Multiplier * 2,
-            player1Shaking: isPlayer1 ? true : null,
-            player2Shaking: isPlayer1 ? null : true,
+            player1Multiplier: playerNumber == 1 ? current.scores.player1Multiplier * 2 : null,
+            player2Multiplier: playerNumber == 2 ? current.scores.player2Multiplier * 2 : null,
+            player3Multiplier: playerNumber == 3 ? current.scores.player3Multiplier * 2 : null,
+            player1Shaking: playerNumber == 1 ? true : null,
+            player2Shaking: playerNumber == 2 ? true : null,
+            player3Shaking: playerNumber == 3 ? true : null,
           ),
         );
       },
@@ -1517,6 +2365,7 @@ class MatgoLogicService {
   }
 
   /// 보너스 카드 사용 (턴 시작 시, 턴 소비 없이 즉시 점수패로 획득)
+  /// 2인/3인 모드 모두 지원
   ///
   /// - 내 턴 시작 시점에만 사용 가능
   /// - 사용 즉시 점수패(피) 영역으로 이동 (쌍피로 계산)
@@ -1542,11 +2391,19 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myHand = List<CardData>.from(
-          isPlayer1 ? current.player1Hand : current.player2Hand,
-        );
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
+        // 플레이어별 손패와 획득패 가져오기 (3인 고스톱 지원)
+        var myHand = List<CardData>.from(switch (playerNumber) {
+          1 => current.player1Hand,
+          2 => current.player2Hand,
+          3 => current.player3Hand,
+          _ => current.player1Hand,
+        });
+        var myCaptured = switch (playerNumber) {
+          1 => current.player1Captured,
+          2 => current.player2Captured,
+          3 => current.player3Captured,
+          _ => current.player1Captured,
+        };
 
         // 보너스 카드가 손패에 있는지 확인
         final hasBonusCard = myHand.any((c) => c.id == bonusCard.id && c.isBonus);
@@ -1567,16 +2424,20 @@ class MatgoLogicService {
         // 새로운 게임 상태 반환 (턴 유지 - 턴을 소비하지 않음!)
         return current.copyWith(
           // turn은 그대로 유지 (턴 소비 안 함)
-          player1Hand: isPlayer1 ? myHand : current.player1Hand,
-          player2Hand: isPlayer1 ? current.player2Hand : myHand,
-          player1Captured: isPlayer1 ? myCaptured : current.player1Captured,
-          player2Captured: isPlayer1 ? current.player2Captured : myCaptured,
+          player1Hand: playerNumber == 1 ? myHand : current.player1Hand,
+          player2Hand: playerNumber == 2 ? myHand : current.player2Hand,
+          player3Hand: playerNumber == 3 ? myHand : current.player3Hand,
+          player1Captured: playerNumber == 1 ? myCaptured : current.player1Captured,
+          player2Captured: playerNumber == 2 ? myCaptured : current.player2Captured,
+          player3Captured: playerNumber == 3 ? myCaptured : current.player3Captured,
           scores: current.scores.copyWith(
-            player1Score: isPlayer1 ? myScore.baseTotal : null,
-            player2Score: isPlayer1 ? null : myScore.baseTotal,
+            player1Score: playerNumber == 1 ? myScore.baseTotal : null,
+            player2Score: playerNumber == 2 ? myScore.baseTotal : null,
+            player3Score: playerNumber == 3 ? myScore.baseTotal : null,
           ),
           lastEvent: SpecialEvent.bonusCardUsed,
           lastEventPlayer: myUid,
+          lastEventAt: DateTime.now().millisecondsSinceEpoch,  // 연속 이벤트 감지용
         );
       },
     );
@@ -1598,8 +2459,13 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
+        // 플레이어별 손패 가져오기 (3인 고스톱 지원)
+        final myHand = switch (playerNumber) {
+          1 => current.player1Hand,
+          2 => current.player2Hand,
+          3 => current.player3Hand,
+          _ => current.player1Hand,
+        };
         final floorCards = current.floorCards;
 
         // 손에 해당 월 3장, 바닥에 1장 확인
@@ -1617,6 +2483,7 @@ class MatgoLogicService {
           bombTargetCard: floorCard.first,  // 바닥의 1장 (획득할 카드)
           lastEvent: SpecialEvent.bomb,
           lastEventPlayer: myUid,
+          lastEventAt: DateTime.now().millisecondsSinceEpoch,
         );
       },
     );
@@ -1640,12 +2507,41 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myHand = List<CardData>.from(
-          isPlayer1 ? current.player1Hand : current.player2Hand,
-        );
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
-        var opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+        // 3인 모드 여부 확인
+        final isGostopMode = current.gameMode == GameMode.gostop;
+        
+        // 플레이어별 손패 및 획득패 설정
+        List<CardData> myHand;
+        CapturedCards myCaptured;
+        
+        switch (playerNumber) {
+          case 1:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+            break;
+          case 2:
+            myHand = List<CardData>.from(current.player2Hand);
+            myCaptured = current.player2Captured;
+            break;
+          case 3:
+            myHand = List<CardData>.from(current.player3Hand);
+            myCaptured = current.player3Captured;
+            break;
+          default:
+            myHand = List<CardData>.from(current.player1Hand);
+            myCaptured = current.player1Captured;
+        }
+        
+        // 피 뺏기 대상 (2인: 상대방 1명 / 3인: 상대방 2명 모두)
+        var opponent1Captured = playerNumber == 1 
+            ? current.player2Captured 
+            : current.player1Captured;
+        var opponent2Captured = isGostopMode
+            ? (playerNumber == 3 
+                ? current.player2Captured 
+                : current.player3Captured)
+            : current.player1Captured;
+        
         var floorCards = List<CardData>.from(current.floorCards);
 
         // 손패에서 3장 제거하고 획득 (4장 모두 획득)
@@ -1658,37 +2554,85 @@ class MatgoLogicService {
         floorCards.removeWhere((f) => f.id == current.bombTargetCard!.id);
         myCaptured = myCaptured.addCard(current.bombTargetCard!);
 
-        // 피 1장 뺏기
+        // 피 뺏기 (3인 모드에서는 두 상대방 모두에게서 뺏음)
         int actualPiStolen = 0;
-        final (newOpponent, stolenPi) = opponentCaptured.removePi();
-        if (stolenPi != null) {
-          opponentCaptured = newOpponent;
-          myCaptured = myCaptured.addCard(stolenPi);
-          actualPiStolen = 1;
+        List<String> piStolenFromPlayers = [];
+        
+        // 첫 번째 상대방에게서 피 뺏기
+        final (newOpponent1, stolenPi1) = opponent1Captured.removePi();
+        if (stolenPi1 != null) {
+          opponent1Captured = newOpponent1;
+          myCaptured = myCaptured.addCard(stolenPi1);
+          actualPiStolen++;
+          if (current.turnOrder.length > 1) {
+            final opponent1Uid = playerNumber == 1 ? current.turnOrder[1] : current.turnOrder[0];
+            piStolenFromPlayers.add(opponent1Uid);
+          }
+        }
+        
+        // 3인 모드에서는 두 번째 상대방에게서도 피 뺏기
+        if (isGostopMode && current.turnOrder.length > 2) {
+          final (newOpponent2, stolenPi2) = opponent2Captured.removePi();
+          if (stolenPi2 != null) {
+            opponent2Captured = newOpponent2;
+            myCaptured = myCaptured.addCard(stolenPi2);
+            actualPiStolen++;
+            final opponent2Uid = playerNumber == 3 ? current.turnOrder[1] : current.turnOrder[2];
+            piStolenFromPlayers.add(opponent2Uid);
+          }
         }
 
         // 점수 계산
         final myScore = ScoreCalculator.calculateScore(myCaptured);
-        final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
+
+        // 플레이어별 획득패 업데이트 (피 뺏기 반영)
+        CapturedCards newPlayer1Captured, newPlayer2Captured, newPlayer3Captured;
+        if (playerNumber == 1) {
+          newPlayer1Captured = myCaptured;
+          newPlayer2Captured = opponent1Captured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else if (playerNumber == 2) {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = myCaptured;
+          newPlayer3Captured = isGostopMode ? opponent2Captured : current.player3Captured;
+        } else {
+          newPlayer1Captured = opponent1Captured;
+          newPlayer2Captured = isGostopMode ? opponent2Captured : current.player2Captured;
+          newPlayer3Captured = myCaptured;
+        }
+
+        // 점수 업데이트를 위한 각 플레이어 점수 계산
+        final opponent1Score = ScoreCalculator.calculateScore(opponent1Captured);
+        final opponent2Score = isGostopMode 
+            ? ScoreCalculator.calculateScore(opponent2Captured)
+            : ScoreResult();
 
         return current.copyWith(
           piStolenCount: actualPiStolen,
-          piStolenFromPlayer: actualPiStolen > 0 ? opponentUid : null,
-          player1Hand: isPlayer1 ? myHand : current.player1Hand,
-          player2Hand: isPlayer1 ? current.player2Hand : myHand,
-          player1Captured: isPlayer1 ? myCaptured : opponentCaptured,
-          player2Captured: isPlayer1 ? opponentCaptured : myCaptured,
+          piStolenFromPlayers: piStolenFromPlayers,
+          player1Hand: playerNumber == 1 ? myHand : current.player1Hand,
+          player2Hand: playerNumber == 2 ? myHand : current.player2Hand,
+          player3Hand: playerNumber == 3 ? myHand : current.player3Hand,
+          player1Captured: newPlayer1Captured,
+          player2Captured: newPlayer2Captured,
+          player3Captured: newPlayer3Captured,
           floorCards: floorCards,
           bombCards: [],  // 폭탄 상태 초기화
           clearBombPlayer: true,
           clearBombTargetCard: true,
           scores: current.scores.copyWith(
-            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
-            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
-            player1Multiplier: isPlayer1 ? current.scores.player1Multiplier * 2 : null,
-            player2Multiplier: isPlayer1 ? null : current.scores.player2Multiplier * 2,
-            player1Bomb: isPlayer1 ? true : null,
-            player2Bomb: isPlayer1 ? null : true,
+            player1Score: playerNumber == 1 ? myScore.baseTotal 
+                : (playerNumber == 2 ? opponent1Score.baseTotal : opponent1Score.baseTotal),
+            player2Score: playerNumber == 2 ? myScore.baseTotal 
+                : (playerNumber == 1 ? opponent1Score.baseTotal 
+                    : (isGostopMode ? opponent2Score.baseTotal : current.scores.player2Score)),
+            player3Score: isGostopMode ? (playerNumber == 3 ? myScore.baseTotal : opponent2Score.baseTotal) : null,
+            player1Multiplier: playerNumber == 1 ? current.scores.player1Multiplier * 2 : null,
+            player2Multiplier: playerNumber == 2 ? current.scores.player2Multiplier * 2 : null,
+            player3Multiplier: playerNumber == 3 ? current.scores.player3Multiplier * 2 : null,
+            player1Bomb: playerNumber == 1 ? true : null,
+            player2Bomb: playerNumber == 2 ? true : null,
+            player3Bomb: playerNumber == 3 ? true : null,
           ),
         );
       },
@@ -1751,8 +2695,13 @@ class MatgoLogicService {
       }
     }
 
-    final isPlayer1 = playerNumber == 1;
-    final myHand = isPlayer1 ? gameState.player1Hand : gameState.player2Hand;
+    // 3인 고스톱 모드 지원: playerNumber에 따라 올바른 손패 선택
+    final myHand = switch (playerNumber) {
+      1 => gameState.player1Hand,
+      2 => gameState.player2Hand,
+      3 => gameState.player3Hand,
+      _ => gameState.player1Hand,
+    };
 
     // 손패가 비어있으면 덱만 뒤집기
     if (myHand.isEmpty) {
@@ -1824,12 +2773,13 @@ class MatgoLogicService {
   }
 
   /// 9월 열끗 선택 완료 처리
+  /// 2인/3인 모드 모두 지원
   ///
   /// [useAsAnimal] true면 열끗(동물)으로, false면 쌍피로 사용
   Future<bool> completeSeptemberChoice({
     required String roomId,
     required String myUid,
-    required String opponentUid,
+    required String opponentUid,  // 2인 모드에서 사용
     required int playerNumber,
     required bool useAsAnimal,
   }) async {
@@ -1854,8 +2804,16 @@ class MatgoLogicService {
           return current;
         }
 
-        final isPlayer1 = playerNumber == 1;
-        var myCaptured = isPlayer1 ? current.player1Captured : current.player2Captured;
+        // 3인 고스톱 모드 여부
+        final isGostopMode = current.gameMode == GameMode.gostop;
+
+        // 플레이어별 획득패 설정 (3인 모드 지원)
+        var myCaptured = switch (playerNumber) {
+          1 => current.player1Captured,
+          2 => current.player2Captured,
+          3 => current.player3Captured,
+          _ => current.player1Captured,
+        };
 
         // 쌍피로 선택한 경우: animal에서 제거하고 pi에 쌍피로 추가
         if (!useAsAnimal) {
@@ -1890,20 +2848,20 @@ class MatgoLogicService {
 
         // 점수 재계산
         final myScore = ScoreCalculator.calculateScore(myCaptured);
-        final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
-        final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
 
-        // Go/Stop 체크 (7점 이상이면 선택 필요)
+        // Go/Stop 체크
         bool waitingForGoStop = false;
         String? goStopPlayer;
 
-        if (myScore.baseTotal >= GameConstants.goStopThreshold) {
+        if (myScore.baseTotal >= current.gameMode.winThreshold) {
           waitingForGoStop = true;
           goStopPlayer = myUid;
         }
 
-        // 다음 턴 결정
-        final nextTurn = waitingForGoStop ? myUid : opponentUid;
+        // 다음 턴 결정 (Go/Stop 대기 중이면 턴 유지)
+        final nextTurn = waitingForGoStop
+            ? myUid
+            : _getNextTurn(current.turnOrder, myUid);
 
         // 게임 종료 체크
         GameEndState endState = GameEndState.none;
@@ -1912,50 +2870,130 @@ class MatgoLogicService {
         bool isGobak = false;
 
         final deck = current.deck;
-        final myHand = isPlayer1 ? current.player1Hand : current.player2Hand;
+        
+        // 내 손패 확인 (3인 모드 지원)
+        final myHand = switch (playerNumber) {
+          1 => current.player1Hand,
+          2 => current.player2Hand,
+          3 => current.player3Hand,
+          _ => current.player1Hand,
+        };
 
-        if (deck.isEmpty && myHand.isEmpty && !waitingForGoStop) {
-          final scores = current.scores;
-          final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
-          final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
-          final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
-          final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
+        // 모든 플레이어의 손패가 비었는지 확인
+        final allHandsEmpty = current.player1Hand.isEmpty &&
+            current.player2Hand.isEmpty &&
+            (!isGostopMode || current.player3Hand.isEmpty);
 
-          final endResult = checkGameEndOnExhaustion(
-            myScore: myScore.baseTotal,
-            opponentScore: opponentScore.baseTotal,
-            myGoCount: myGoCount,
-            opponentGoCount: opponentGoCount,
-            myUid: myUid,
-            opponentUid: opponentUid,
-            myMultiplier: myMultiplier,
-            opponentMultiplier: opponentMultiplier,
-            myCaptured: myCaptured,
-            opponentCaptured: opponentCaptured,
-          );
+        if (deck.isEmpty && allHandsEmpty && !waitingForGoStop) {
+          if (isGostopMode) {
+            // 3인 고스톱 모드: 점수 비교로 승자 결정 (고박 없음)
+            final player1Score = playerNumber == 1 
+                ? myScore.baseTotal 
+                : ScoreCalculator.calculateScore(current.player1Captured).baseTotal;
+            final player2Score = playerNumber == 2 
+                ? myScore.baseTotal 
+                : ScoreCalculator.calculateScore(current.player2Captured).baseTotal;
+            final player3Score = playerNumber == 3 
+                ? myScore.baseTotal 
+                : ScoreCalculator.calculateScore(current.player3Captured).baseTotal;
+            
+            final playerScores = [
+              (uid: current.turnOrder.isNotEmpty ? current.turnOrder[0] : myUid, score: player1Score),
+              (uid: current.turnOrder.length > 1 ? current.turnOrder[1] : opponentUid, score: player2Score),
+              (uid: current.turnOrder.length > 2 ? current.turnOrder[2] : '', score: player3Score),
+            ];
+            
+            final endResult = checkGameEndOnExhaustion3P(
+              playerScores: playerScores,
+              gameMode: current.gameMode,
+            );
+            
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+          } else {
+            // 2인 맞고 모드: 기존 로직
+            final scores = current.scores;
+            final isPlayer1 = playerNumber == 1;
+            final opponentCaptured = isPlayer1 ? current.player2Captured : current.player1Captured;
+            final opponentScore = ScoreCalculator.calculateScore(opponentCaptured);
+            
+            final myGoCount = isPlayer1 ? scores.player1GoCount : scores.player2GoCount;
+            final opponentGoCount = isPlayer1 ? scores.player2GoCount : scores.player1GoCount;
+            final myMultiplier = isPlayer1 ? scores.player1Multiplier : scores.player2Multiplier;
+            final opponentMultiplier = isPlayer1 ? scores.player2Multiplier : scores.player1Multiplier;
 
-          endState = endResult.endState;
-          winner = endResult.winner;
-          finalScore = endResult.finalScore;
-          isGobak = endResult.isGobak;
+            final endResult = checkGameEndOnExhaustion(
+              myScore: myScore.baseTotal,
+              opponentScore: opponentScore.baseTotal,
+              myGoCount: myGoCount,
+              opponentGoCount: opponentGoCount,
+              myUid: myUid,
+              opponentUid: opponentUid,
+              myMultiplier: myMultiplier,
+              opponentMultiplier: opponentMultiplier,
+              myCaptured: myCaptured,
+              opponentCaptured: opponentCaptured,
+              gameMode: current.gameMode,
+            );
+
+            endState = endResult.endState;
+            winner = endResult.winner;
+            finalScore = endResult.finalScore;
+            isGobak = endResult.isGobak;
+          }
+        }
+
+        // 플레이어별 획득패 및 점수 업데이트 (3인 모드 지원)
+        CapturedCards newPlayer1Captured, newPlayer2Captured, newPlayer3Captured;
+        int newPlayer1Score, newPlayer2Score, newPlayer3Score;
+        
+        if (playerNumber == 1) {
+          newPlayer1Captured = myCaptured;
+          newPlayer2Captured = current.player2Captured;
+          newPlayer3Captured = current.player3Captured;
+          newPlayer1Score = myScore.baseTotal;
+          newPlayer2Score = current.scores.player2Score;
+          newPlayer3Score = current.scores.player3Score;
+        } else if (playerNumber == 2) {
+          newPlayer1Captured = current.player1Captured;
+          newPlayer2Captured = myCaptured;
+          newPlayer3Captured = current.player3Captured;
+          newPlayer1Score = current.scores.player1Score;
+          newPlayer2Score = myScore.baseTotal;
+          newPlayer3Score = current.scores.player3Score;
+        } else {
+          newPlayer1Captured = current.player1Captured;
+          newPlayer2Captured = current.player2Captured;
+          newPlayer3Captured = myCaptured;
+          newPlayer1Score = current.scores.player1Score;
+          newPlayer2Score = current.scores.player2Score;
+          newPlayer3Score = myScore.baseTotal;
         }
 
         return current.copyWith(
           turn: nextTurn,
+          currentTurnIndex: current.turnOrder.indexOf(nextTurn),
           turnStartTime: DateTime.now().millisecondsSinceEpoch,
-          player1Captured: isPlayer1 ? myCaptured : current.player1Captured,
-          player2Captured: isPlayer1 ? current.player2Captured : myCaptured,
+          player1Captured: newPlayer1Captured,
+          player2Captured: newPlayer2Captured,
+          player3Captured: newPlayer3Captured,
           scores: ScoreInfo(
-            player1Score: isPlayer1 ? myScore.baseTotal : opponentScore.baseTotal,
-            player2Score: isPlayer1 ? opponentScore.baseTotal : myScore.baseTotal,
+            player1Score: newPlayer1Score,
+            player2Score: newPlayer2Score,
+            player3Score: newPlayer3Score,
             player1GoCount: current.scores.player1GoCount,
             player2GoCount: current.scores.player2GoCount,
+            player3GoCount: current.scores.player3GoCount,
             player1Multiplier: current.scores.player1Multiplier,
             player2Multiplier: current.scores.player2Multiplier,
+            player3Multiplier: current.scores.player3Multiplier,
             player1Shaking: current.scores.player1Shaking,
             player2Shaking: current.scores.player2Shaking,
+            player3Shaking: current.scores.player3Shaking,
             player1Bomb: current.scores.player1Bomb,
             player2Bomb: current.scores.player2Bomb,
+            player3Bomb: current.scores.player3Bomb,
           ),
           endState: endState,
           winner: winner,

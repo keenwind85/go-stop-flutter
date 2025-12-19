@@ -207,6 +207,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         roomId: widget.roomId,
         hostUid: _currentRoom!.host.uid,
         guestUid: _currentRoom!.guest!.uid,
+        hostName: _currentRoom!.host.displayName,
+        guestName: _currentRoom!.guest!.displayName,
+        guest2Uid: _currentRoom!.guest2?.uid,
+        guest2Name: _currentRoom!.guest2?.displayName,
+        gameMode: _currentRoom!.gameMode,
       );
     } catch (e) {
       // Error handling
@@ -572,7 +577,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   Widget _buildResultDialog(GameState gameState, String? myUid) {
     final isWinner = gameState.winner == myUid;
     final isPlayer1 = widget.isHost;
-    final player1Uid = widget.isHost ? myUid : widget.room.guestId;
+    final player1Uid = widget.isHost ? myUid : _currentRoom?.guest?.uid;
 
     // 승자의 점수 상세 계산 (모든 승리 상태에서 계산: win, gobak, autoWin, chongtong)
     FinalScoreResult? scoreDetail;
@@ -603,6 +608,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         goCount: winnerGoCount,
         playerMultiplier: winnerMultiplier,
         isGobak: gameState.isGobak,
+        gameMode: _currentRoom?.gameMode ?? GameMode.matgo,
       );
     }
 

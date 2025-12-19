@@ -20,13 +20,14 @@ class OpponentZone extends StatelessWidget {
   final bool isOpponentTurn;
   final bool isShaking;   // 흔들기 사용 여부
   final bool hasBomb;     // 폭탄 사용 여부
+  final bool isMeongTta;  // 멍따 상태 (열끗 7장 이상)
   final int? coinBalance; // 코인 잔액
 
   /// 턴 타이머 관련
   final int? remainingSeconds;  // 남은 시간 (초)
 
   /// 아바타 관련
-  final bool isHost;  // 상대방이 호스트인지 여부
+  final int playerNumber;  // 상대방의 플레이어 번호 (1=Host, 2=Guest, 3=Guest2)
   final AvatarState avatarState;
 
   const OpponentZone({
@@ -39,9 +40,10 @@ class OpponentZone extends StatelessWidget {
     required this.isOpponentTurn,
     this.isShaking = false,
     this.hasBomb = false,
+    this.isMeongTta = false,
     this.coinBalance,
     this.remainingSeconds,
-    this.isHost = false,  // 기본값: 상대방은 게스트
+    this.playerNumber = 2,  // 기본값: 상대방은 게스트
     this.avatarState = AvatarState.normal,
   });
 
@@ -152,8 +154,8 @@ class OpponentZone extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              // 고 카운트 + 흔들기/폭탄 태그
-              if (goCount > 0 || isShaking || hasBomb)
+              // 고 카운트 + 흔들기/폭탄/멍따 태그
+              if (goCount > 0 || isShaking || hasBomb || isMeongTta)
                 Container(
                   margin: const EdgeInsets.only(top: 2),
                   child: Row(
@@ -219,6 +221,26 @@ class OpponentZone extends StatelessWidget {
                             '폭탄',
                             style: TextStyle(
                               color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                      // 멍따 태그 (열끗 7장 이상)
+                      if (isMeongTta) ...[
+                        if (goCount > 0 || isShaking || hasBomb) const SizedBox(width: 4),
+                        Container(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade700.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            '멍따',
+                            style: TextStyle(
+                              color: Colors.yellow,
                               fontSize: 8,
                               fontWeight: FontWeight.bold,
                             ),
@@ -321,7 +343,7 @@ class OpponentZone extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: GameAvatar(
-                isHost: isHost,
+                playerNumber: playerNumber,
                 state: avatarState,
                 size: avatarSize,
               ),
@@ -329,40 +351,44 @@ class OpponentZone extends StatelessWidget {
             // 획득 패 영역
             Expanded(
               child: hasCards
-                  ? SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          // 광
-                          if (captured!.kwang.isNotEmpty)
-                            _buildCardGroup(
-                              cards: captured!.kwang,
-                              label: '광',
-                              labelColor: AppColors.cardHighlight,
-                            ),
-                          // 열끗 (동물)
-                          if (captured!.animal.isNotEmpty)
-                            _buildCardGroup(
-                              cards: captured!.animal,
-                              label: '열',
-                              labelColor: AppColors.goRed,
-                            ),
-                          // 띠
-                          if (captured!.ribbon.isNotEmpty)
-                            _buildCardGroup(
-                              cards: captured!.ribbon,
-                              label: '띠',
-                              labelColor: AppColors.stopBlue,
-                            ),
-                          // 피
-                          if (captured!.pi.isNotEmpty)
-                            _buildCardGroup(
-                              cards: captured!.pi,
-                              label: '피',
-                              labelColor: AppColors.primaryLight,
-                              showCount: captured!.piCount,
-                            ),
-                        ],
+                  ? Align(
+                      alignment: Alignment.centerLeft,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 광
+                            if (captured!.kwang.isNotEmpty)
+                              _buildCardGroup(
+                                cards: captured!.kwang,
+                                label: '광',
+                                labelColor: AppColors.cardHighlight,
+                              ),
+                            // 열끗 (동물)
+                            if (captured!.animal.isNotEmpty)
+                              _buildCardGroup(
+                                cards: captured!.animal,
+                                label: '열',
+                                labelColor: AppColors.goRed,
+                              ),
+                            // 띠
+                            if (captured!.ribbon.isNotEmpty)
+                              _buildCardGroup(
+                                cards: captured!.ribbon,
+                                label: '띠',
+                                labelColor: AppColors.stopBlue,
+                              ),
+                            // 피
+                            if (captured!.pi.isNotEmpty)
+                              _buildCardGroup(
+                                cards: captured!.pi,
+                                label: '피',
+                                labelColor: AppColors.primaryLight,
+                                showCount: captured!.piCount,
+                              ),
+                          ],
+                        ),
                       ),
                     )
                   : Center(

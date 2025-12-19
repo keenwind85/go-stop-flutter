@@ -17,7 +17,8 @@ class CardAnimationController extends ChangeNotifier {
   VoidCallback? _onMissSound;
 
   /// 초기화 (TickerProvider 필요)
-  void initialize(TickerProvider vsync, {
+  void initialize(
+    TickerProvider vsync, {
     VoidCallback? onImpactSound,
     VoidCallback? onSweepSound,
     VoidCallback? onMatchSound,
@@ -34,7 +35,8 @@ class CardAnimationController extends ChangeNotifier {
   }
 
   /// 현재 애니메이션 중인 카드 목록
-  List<CardAnimationState> get animatingCards => _animator?.animatingCards ?? [];
+  List<CardAnimationState> get animatingCards =>
+      _animator?.animatingCards ?? [];
 
   /// 활성 이펙트 목록
   List<CardEffectData> get activeEffects => List.unmodifiable(_activeEffects);
@@ -104,11 +106,14 @@ class CardAnimationController extends ChangeNotifier {
       _onMatchSound?.call();
     }
 
-    // 착지 이펙트 추가 (매칭 없으면 메시지도 표시)
-    _addImpactEffect(
-      floorPosition,
-      message: hasNoMatch ? '맞는 바닥패가 없어요 ㅠ' : null,
-    );
+    // 착지 이펙트 추가 (매칭 결과에 따라 다른 메시지 표시)
+    String? message;
+    if (hasNoMatch) {
+      message = '맞는 바닥패가 없어요 😭';
+    } else {
+      message = '잘 붙었어요 😍';
+    }
+    _addImpactEffect(floorPosition, message: message);
   }
 
   /// ========================================
@@ -129,9 +134,11 @@ class CardAnimationController extends ChangeNotifier {
     if (cards.isEmpty) return;
 
     // 중심점 계산 (쓸어담기 시작점)
-    final centerX = fromPositions.map((p) => p.dx).reduce((a, b) => a + b) /
+    final centerX =
+        fromPositions.map((p) => p.dx).reduce((a, b) => a + b) /
         fromPositions.length;
-    final centerY = fromPositions.map((p) => p.dy).reduce((a, b) => a + b) /
+    final centerY =
+        fromPositions.map((p) => p.dy).reduce((a, b) => a + b) /
         fromPositions.length;
     final gatherPoint = Offset(centerX, centerY);
 
@@ -261,11 +268,7 @@ class CardAnimationController extends ChangeNotifier {
 }
 
 /// 이펙트 타입
-enum CardEffectType {
-  impact,
-  sweep,
-  countPopup,
-}
+enum CardEffectType { impact, sweep, countPopup }
 
 /// 이펙트 데이터
 class CardEffectData {
@@ -331,9 +334,7 @@ class CardPositionTracker {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return null;
 
-    return box.localToGlobal(
-      Offset(box.size.width / 2, box.size.height / 2),
-    );
+    return box.localToGlobal(Offset(box.size.width / 2, box.size.height / 2));
   }
 
   /// 덱 위치 계산 (덱 중앙 상단)
@@ -344,9 +345,7 @@ class CardPositionTracker {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return null;
 
-    return box.localToGlobal(
-      Offset(box.size.width / 2, box.size.height * 0.3),
-    );
+    return box.localToGlobal(Offset(box.size.width / 2, box.size.height * 0.3));
   }
 
   /// 획득 영역 위치 계산 (플레이어 기준)
@@ -357,9 +356,7 @@ class CardPositionTracker {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return null;
 
-    return box.localToGlobal(
-      Offset(box.size.width / 2, box.size.height / 2),
-    );
+    return box.localToGlobal(Offset(box.size.width / 2, box.size.height / 2));
   }
 
   /// 키 정리

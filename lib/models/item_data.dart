@@ -38,7 +38,7 @@ class ItemData {
       name: '光끼의 물약',
       shortDesc: '光끼 게이지가 즉시 차오릅니다',
       description: '아이템 사용자의 光끼 게이지가 즉시 100으로 설정됩니다. 단, 光끼 모드가 이미 발동 중이거나 상대방 게이지가 이미 100인 경우 사용 불가합니다.',
-      price: 100,
+      price: 50,
       iconEmoji: '🧪',
     ),
     ItemType.forceGo: ItemData(
@@ -46,7 +46,7 @@ class ItemData {
       name: '제발 Go만해!',
       shortDesc: '상대방은 Go만 가능합니다',
       description: '아이템 공격을 당한 플레이어는 다음 Go/Stop 선택 시 Go만 선택 가능합니다.',
-      price: 50,
+      price: 30,
       iconEmoji: '🏃',
     ),
     ItemType.forceStop: ItemData(
@@ -54,7 +54,7 @@ class ItemData {
       name: '제발 Stop만해!',
       shortDesc: '상대방은 Stop만 가능합니다',
       description: '아이템 공격을 당한 플레이어는 다음 Go/Stop 선택 시 Stop만 선택 가능합니다.',
-      price: 50,
+      price: 30,
       iconEmoji: '🛑',
     ),
     ItemType.swapHands: ItemData(
@@ -62,7 +62,7 @@ class ItemData {
       name: '우리 패 바꾸자!',
       shortDesc: '플레이어의 손패를 교환합니다',
       description: '양 플레이어의 손패 전체를 서로 교환합니다.',
-      price: 50,
+      price: 30,
       iconEmoji: '🔄',
     ),
     ItemType.stealFromDeck: ItemData(
@@ -70,7 +70,7 @@ class ItemData {
       name: '밑장 빼기',
       shortDesc: '더미패 1장을 몰래 가져갑니다',
       description: '아이템 사용자가 더미패에서 랜덤으로 1장을 몰래 자신의 손패에 추가합니다.',
-      price: 30,
+      price: 20,
       iconEmoji: '🃏',
     ),
     ItemType.replaceHand: ItemData(
@@ -78,7 +78,7 @@ class ItemData {
       name: '손패 교체',
       shortDesc: '손패를 더미패로 교체합니다',
       description: '아이템 사용자의 손패 전체를 더미패의 랜덤 카드로 교체합니다. 더미패가 손패 개수보다 적으면 사용 불가합니다.',
-      price: 30,
+      price: 20,
       iconEmoji: '🎴',
     ),
     ItemType.replaceFloor: ItemData(
@@ -86,7 +86,7 @@ class ItemData {
       name: '바닥패 교체',
       shortDesc: '바닥패를 더미패로 교체합니다',
       description: '바닥패 전체를 더미패의 랜덤 카드로 교체합니다. 더미패가 바닥패 개수보다 적으면 사용 불가합니다.',
-      price: 30,
+      price: 20,
       iconEmoji: '🌊',
     ),
     ItemType.gwangPriority: ItemData(
@@ -94,7 +94,7 @@ class ItemData {
       name: '光의 기운',
       shortDesc: '광을 뽑을 확률이 증가합니다',
       description: '3턴간 더미패 뒤집기 시 덱에 광 카드가 있으면 광 카드가 최우선으로 나옵니다.',
-      price: 30,
+      price: 20,
       iconEmoji: '✨',
     ),
   };
@@ -102,6 +102,13 @@ class ItemData {
   /// 아이템 타입으로 아이템 데이터 가져오기
   static ItemData getItem(ItemType type) {
     return allItems[type]!;
+  }
+
+  /// 고스톱 모드에서 대상 선택이 필요한 아이템인지 확인
+  static bool needsTargetSelection(ItemType type) {
+    return type == ItemType.forceGo ||
+        type == ItemType.forceStop ||
+        type == ItemType.swapHands;
   }
 
   /// 아이템 사용 가능 여부 검사

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config/constants.dart';
 import '../models/game_room.dart';
 import '../models/player_info.dart';
 import 'coin_service.dart';
@@ -20,22 +21,25 @@ class RoomService {
   static const int roomExpirationMs = 60 * 60 * 1000;
 
   /// 새 방 생성 (호스트로 입장)
+  /// [gameMode]: 게임 모드 (맞고: 2인, 고스톱: 3인)
   Future<GameRoom> createRoom({
     required String hostUid,
     required String hostName,
+    GameMode gameMode = GameMode.matgo,
   }) async {
     final roomId = _generateRoomId();
     final now = DateTime.now().millisecondsSinceEpoch;
 
     final room = GameRoom(
       roomId: roomId,
+      gameMode: gameMode,
       host: PlayerInfo(uid: hostUid, displayName: hostName),
       state: RoomState.waiting,
       createdAt: now,
     );
 
     await _roomsRef.child(roomId).set(room.toJson());
-    debugPrint('[RoomService] Created room: $roomId');
+    debugPrint('[RoomService] Created ${gameMode.displayName} room: $roomId');
 
     return room;
   }
@@ -143,6 +147,8 @@ class RoomService {
   }
 
   /// 특정 방에 게스트로 입장
+  /// 맞고(2인): guest 슬롯에 입장
+  /// 고스톱(3인): guest 슬롯이 비어있으면 guest로, 차 있으면 guest2로 입장
   Future<GameRoom?> joinRoom({
     required String roomId,
     required String guestUid,
@@ -160,28 +166,43 @@ class RoomService {
 
       final roomData = Map<String, dynamic>.from(snapshot.value as Map);
       final room = GameRoom.fromJson(roomData);
-      debugPrint('[RoomService] Room exists: $roomId, state: ${room.state}, guest: ${room.guest}');
+      debugPrint('[RoomService] Room exists: $roomId, mode: ${room.gameMode.displayName}, state: ${room.state}');
 
-      // 이미 게스트가 있거나 대기 상태가 아니면 실패
-      if (room.guest != null) {
-        debugPrint('[RoomService] Cannot join: guest already exists');
-        return null;
-      }
+      // 대기 상태가 아니면 실패
       if (room.state != RoomState.waiting) {
         debugPrint('[RoomService] Cannot join: room state is ${room.state}');
         return null;
       }
 
-      // 게스트 정보 추가
+      // 방이 이미 가득 찼는지 확인
+      if (room.isFull) {
+        debugPrint('[RoomService] Cannot join: room is full');
+        return null;
+      }
+
+      // 게스트 정보 생성
       final guestInfo = PlayerInfo(
         uid: guestUid,
         displayName: guestName,
       );
 
-      await roomRef.update({
-        'guest': guestInfo.toJson(),
-      });
+      // 입장 슬롯 결정
+      final updates = <String, dynamic>{};
 
+      if (room.guest == null) {
+        // guest 슬롯이 비어있으면 guest로 입장
+        updates['guest'] = guestInfo.toJson();
+        debugPrint('[RoomService] Joining as guest (player2)');
+      } else if (room.gameMode == GameMode.gostop && room.guest2 == null) {
+        // 고스톱 모드이고 guest2 슬롯이 비어있으면 guest2로 입장
+        updates['guest2'] = guestInfo.toJson();
+        debugPrint('[RoomService] Joining as guest2 (player3)');
+      } else {
+        debugPrint('[RoomService] Cannot join: no available slot');
+        return null;
+      }
+
+      await roomRef.update(updates);
       debugPrint('[RoomService] Joined room: $roomId');
 
       // 업데이트된 방 정보 반환
@@ -216,18 +237,47 @@ class RoomService {
   }) async {
     final gameStateRef = _roomsRef.child(roomId).child('gameState');
 
-    final result = await gameStateRef.runTransaction((data) {
-      if (data == null) return Transaction.abort();
+    try {
+      final result = await gameStateRef.runTransaction((data) {
+        if (data == null) return Transaction.abort();
 
-      final currentState = GameState.fromJson(
-        Map<String, dynamic>.from(data as Map),
-      );
-      final newState = updater(currentState);
+        try {
+          final currentState = GameState.fromJson(
+            Map<String, dynamic>.from(data as Map),
+          );
+          final newState = updater(currentState);
 
-      return Transaction.success(newState.toJson());
-    });
+          return Transaction.success(newState.toJson());
+        } catch (e) {
+          debugPrint('[RoomService] Transaction updater error: $e');
+          return Transaction.abort();
+        }
+      });
 
-    return result.committed;
+      return result.committed;
+    } on StateError catch (e) {
+      // Flutter Web에서 Firebase Transaction 중 발생하는 StateError 처리
+      debugPrint('[RoomService] Transaction StateError (retrying with set): $e');
+      
+      // Transaction 실패 시 일반 set으로 대체 시도
+      try {
+        final snapshot = await gameStateRef.get();
+        if (!snapshot.exists) return false;
+        
+        final currentState = GameState.fromJson(
+          Map<String, dynamic>.from(snapshot.value as Map),
+        );
+        final newState = updater(currentState);
+        await gameStateRef.set(newState.toJson());
+        return true;
+      } catch (fallbackError) {
+        debugPrint('[RoomService] Fallback set also failed: $fallbackError');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('[RoomService] Transaction failed: $e');
+      return false;
+    }
   }
 
   /// 방 실시간 구독
@@ -311,11 +361,13 @@ class RoomService {
   }
 
   /// 방 나가기
-  /// 게임 중인 경우 leftPlayer를 설정하고, 양쪽 모두 나가면 방 삭제
+  /// 게임 중인 경우 leftPlayer를 설정하고, 모든 플레이어가 나가면 방 삭제
+  /// [playerSlot]: 플레이어 슬롯 (1=host, 2=guest, 3=guest2)
   Future<void> leaveRoom({
     required String roomId,
     required String playerId,
     required bool isHost,
+    bool isGuest2 = false,
   }) async {
     // 먼저 현재 방 상태 확인
     final snapshot = await _roomsRef.child(roomId).get();
@@ -325,17 +377,30 @@ class RoomService {
     }
 
     final roomData = Map<String, dynamic>.from(snapshot.value as Map);
-    final state = roomData['state'] as String?;
-    final leftPlayer = roomData['leftPlayer'] as String?;
+    final room = GameRoom.fromJson(roomData);
+    final state = room.state;
+    final leftPlayer = room.leftPlayer;
 
     // 게임 중인 경우 (playing 상태)
-    if (state == 'playing') {
-      // 이미 다른 플레이어가 나간 경우 (두 번째 플레이어 나감)
+    if (state == RoomState.playing) {
+      // 이미 다른 플레이어가 나간 경우
       if (leftPlayer != null && leftPlayer != playerId) {
-        // 양쪽 모두 나감 → 방 삭제 (무효 처리)
-        await _roomsRef.child(roomId).remove();
-        debugPrint('[RoomService] Both players left during game, room deleted: $roomId');
-        return;
+        // 3인 모드에서 아직 한 명 남아있을 수 있음
+        if (room.gameMode == GameMode.gostop) {
+          // 남은 플레이어 수 확인 (leftPlayer 제외)
+          final remainingCount = room.currentPlayerCount - 1; // 나가려는 사람 제외
+          if (remainingCount <= 1) {
+            // 마지막 한 명만 남음 → 방 삭제
+            await _roomsRef.child(roomId).remove();
+            debugPrint('[RoomService] All players left during game, room deleted: $roomId');
+            return;
+          }
+        } else {
+          // 2인 모드: 양쪽 모두 나감 → 방 삭제
+          await _roomsRef.child(roomId).remove();
+          debugPrint('[RoomService] Both players left during game, room deleted: $roomId');
+          return;
+        }
       }
 
       // 첫 번째 플레이어가 나감 → leftPlayer 설정
@@ -347,19 +412,31 @@ class RoomService {
       return;
     }
 
-    // 대기 중이거나 게임 종료된 경우 기존 로직
+    // 대기 중이거나 게임 종료된 경우
     if (isHost) {
       // 호스트가 나가면 방 삭제
       await _roomsRef.child(roomId).remove();
       debugPrint('[RoomService] Room deleted: $roomId');
+    } else if (isGuest2) {
+      // guest2가 나가면 guest2 정보만 삭제
+      await _roomsRef.child(roomId).update({
+        'guest2': null,
+        'state': 'waiting',
+        'gameState': null,
+        'leftPlayer': null,
+        'leftAt': null,
+        'guest2RematchRequest': false,
+      });
+      debugPrint('[RoomService] Guest2 left room: $roomId');
     } else {
-      // 게스트가 나가면 게스트 정보만 삭제
+      // guest가 나가면 guest 정보만 삭제
       await _roomsRef.child(roomId).update({
         'guest': null,
         'state': 'waiting',
         'gameState': null,
         'leftPlayer': null,
         'leftAt': null,
+        'guestRematchRequest': false,
       });
       debugPrint('[RoomService] Guest left room: $roomId');
     }
@@ -401,15 +478,27 @@ class RoomService {
   }
 
   /// 재대결 투표
+  /// [playerSlot]: 플레이어 슬롯 (1=host, 2=guest, 3=guest2)
   Future<void> voteRematch({
     required String roomId,
     required bool isHost,
     required String vote, // 'agree' | 'disagree'
+    bool isGuest2 = false,
   }) async {
-    final field = isHost ? 'hostRematchRequest' : 'guestRematchRequest';
+    String field;
+    if (isHost) {
+      field = 'hostRematchRequest';
+    } else if (isGuest2) {
+      field = 'guest2RematchRequest';
+    } else {
+      field = 'guestRematchRequest';
+    }
+
     final value = vote == 'agree';
     await _roomsRef.child(roomId).update({field: value});
-    debugPrint('[RoomService] Rematch vote: $roomId by ${isHost ? 'host' : 'guest'} = $vote');
+
+    final playerName = isHost ? 'host' : (isGuest2 ? 'guest2' : 'guest');
+    debugPrint('[RoomService] Rematch vote: $roomId by $playerName = $vote');
   }
 
   /// 재대결 투표 상태 확인
@@ -442,6 +531,7 @@ class RoomService {
       'gameState': null,
       'hostRematchRequest': false,
       'guestRematchRequest': false,
+      'guest2RematchRequest': false, // 3인 모드 지원
     };
 
     // lastWinner가 제공되면 저장
@@ -457,26 +547,35 @@ class RoomService {
   }
 
   /// 게임 종료 및 코인 정산
+  ///
+  /// [coinMultiplier]: 코인 정산 배수 (기본 1)
+  /// [isGwangBak]: 광박 여부 (패자 광 0장)
+  /// [isPiBak]: 피박 여부 (패자 피 7장 이하)
+  /// [isGobak]: 고박 여부 (패자가 1고+ 상태에서 역전패)
   Future<({bool success, int transferAmount, String message})> settleGameResult({
     required String roomId,
     required String winnerUid,
     required String loserUid,
     required int points,
-    required int multiplier,
+    int coinMultiplier = 1,
+    bool isGwangBak = false,
+    bool isPiBak = false,
+    bool isGobak = false,
     bool isAllIn = false,
   }) async {
     try {
-      await _coinService.settleGame(
+      final result = await _coinService.settleGame(
         winnerUid: winnerUid,
         loserUid: loserUid,
         points: points,
-        multiplier: multiplier,
+        coinMultiplier: coinMultiplier,
+        isGwangBak: isGwangBak,
+        isPiBak: isPiBak,
+        isGobak: isGobak,
         isAllIn: isAllIn,
       );
 
-      final transferAmount = isAllIn
-          ? (await _coinService.getUserWallet(loserUid))?.coin ?? 0
-          : points * multiplier;
+      final transferAmount = result.actualTransfer;
 
       // 방 상태 업데이트
       await _roomsRef.child(roomId).update({
@@ -485,14 +584,17 @@ class RoomService {
           'winner': winnerUid,
           'loser': loserUid,
           'points': points,
-          'multiplier': multiplier,
+          'coinMultiplier': coinMultiplier,
+          'isGwangBak': isGwangBak,
+          'isPiBak': isPiBak,
+          'isGobak': isGobak,
           'transferAmount': transferAmount,
           'isAllIn': isAllIn,
           'settledAt': DateTime.now().millisecondsSinceEpoch,
         },
       });
 
-      debugPrint('[RoomService] Game settled: $winnerUid won $transferAmount coins');
+      debugPrint('[RoomService] Game settled: $winnerUid won $transferAmount coins (박: 광박=$isGwangBak, 피박=$isPiBak, 고박=$isGobak)');
       return (
         success: true,
         transferAmount: transferAmount,

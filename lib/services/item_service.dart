@@ -237,6 +237,7 @@ class ItemService {
   // ==================== 아이템 사용 관련 ====================
 
   /// 아이템 사용
+  /// [targetPlayerNumber]: 고스톱 모드에서 대상 선택이 필요한 아이템의 경우 타겟 플레이어 번호 (2 또는 3)
   Future<({bool success, String message, GameState? newState})> useItem({
     required String roomId,
     required String playerUid,
@@ -244,6 +245,7 @@ class ItemService {
     required ItemType type,
     required int playerNumber,
     required GameState currentState,
+    int? targetPlayerNumber,
   }) async {
     final itemData = ItemData.getItem(type);
 
@@ -258,9 +260,12 @@ class ItemService {
     }
 
     // 2. 이미 사용했는지 확인
-    final effects = playerNumber == 1
-        ? currentState.player1ItemEffects
-        : currentState.player2ItemEffects;
+    final effects = switch (playerNumber) {
+      1 => currentState.player1ItemEffects,
+      2 => currentState.player2ItemEffects,
+      3 => currentState.player3ItemEffects,
+      _ => currentState.player2ItemEffects,
+    };
     if (effects?.usedItem != null) {
       return (
         success: false,
@@ -285,6 +290,7 @@ class ItemService {
       playerUid: playerUid,
       opponentUid: opponentUid,
       playerNumber: playerNumber,
+      targetPlayerNumber: targetPlayerNumber,
     );
 
     // 4-1. 光끼의 물약인 경우 게이지 즉시 100으로 설정
@@ -306,24 +312,22 @@ class ItemService {
   }
 
   /// 아이템 효과 적용
+  /// [targetPlayerNumber]: 고스톱 모드에서 대상 선택이 필요한 아이템의 타겟 플레이어 번호
   GameState _applyItemEffect({
     required ItemType type,
     required GameState state,
     required String playerUid,
     required String opponentUid,
     required int playerNumber,
+    int? targetPlayerNumber,
   }) {
-    final isPlayer1 = playerNumber == 1;
-
     // 현재 플레이어의 효과 상태 가져오기
-    final myEffects = isPlayer1
-        ? (state.player1ItemEffects ?? const ItemEffects())
-        : (state.player2ItemEffects ?? const ItemEffects());
-
-    // 상대방 효과 상태 가져오기
-    final opponentEffects = isPlayer1
-        ? (state.player2ItemEffects ?? const ItemEffects())
-        : (state.player1ItemEffects ?? const ItemEffects());
+    final myEffects = switch (playerNumber) {
+      1 => state.player1ItemEffects ?? const ItemEffects(),
+      2 => state.player2ItemEffects ?? const ItemEffects(),
+      3 => state.player3ItemEffects ?? const ItemEffects(),
+      _ => state.player2ItemEffects ?? const ItemEffects(),
+    };
 
     GameState newState = state;
 
@@ -345,10 +349,18 @@ class ItemService {
           playerNumber: playerNumber,
           effects: myEffects.copyWith(usedItem: type.name),
         );
+        // 타겟 플레이어에게 효과 적용
+        final forceGoTarget = targetPlayerNumber ?? (playerNumber == 1 ? 2 : 1);
+        final forceGoTargetEffects = switch (forceGoTarget) {
+          1 => state.player1ItemEffects ?? const ItemEffects(),
+          2 => state.player2ItemEffects ?? const ItemEffects(),
+          3 => state.player3ItemEffects ?? const ItemEffects(),
+          _ => state.player2ItemEffects ?? const ItemEffects(),
+        };
         newState = _updatePlayerEffects(
           state: newState,
-          playerNumber: isPlayer1 ? 2 : 1,
-          effects: opponentEffects.copyWith(forceGoOnly: true),
+          playerNumber: forceGoTarget,
+          effects: forceGoTargetEffects.copyWith(forceGoOnly: true),
         );
         break;
 
@@ -359,19 +371,70 @@ class ItemService {
           playerNumber: playerNumber,
           effects: myEffects.copyWith(usedItem: type.name),
         );
+        // 타겟 플레이어에게 효과 적용
+        final forceStopTarget = targetPlayerNumber ?? (playerNumber == 1 ? 2 : 1);
+        final forceStopTargetEffects = switch (forceStopTarget) {
+          1 => state.player1ItemEffects ?? const ItemEffects(),
+          2 => state.player2ItemEffects ?? const ItemEffects(),
+          3 => state.player3ItemEffects ?? const ItemEffects(),
+          _ => state.player2ItemEffects ?? const ItemEffects(),
+        };
         newState = _updatePlayerEffects(
           state: newState,
-          playerNumber: isPlayer1 ? 2 : 1,
-          effects: opponentEffects.copyWith(forceStopOnly: true),
+          playerNumber: forceStopTarget,
+          effects: forceStopTargetEffects.copyWith(forceStopOnly: true),
         );
         break;
 
       case ItemType.swapHands:
-        // 손패 교환
-        newState = newState.copyWith(
-          player1Hand: state.player2Hand,
-          player2Hand: state.player1Hand,
-        );
+        // 손패 교환 (내 손패와 타겟 플레이어의 손패 교환)
+        final swapTarget = targetPlayerNumber ?? (playerNumber == 1 ? 2 : 1);
+        final myHand = switch (playerNumber) {
+          1 => state.player1Hand,
+          2 => state.player2Hand,
+          3 => state.player3Hand,
+          _ => state.player1Hand,
+        };
+        final targetHand = switch (swapTarget) {
+          1 => state.player1Hand,
+          2 => state.player2Hand,
+          3 => state.player3Hand,
+          _ => state.player2Hand,
+        };
+
+        // 내 손패와 타겟 손패 교환
+        switch (playerNumber) {
+          case 1:
+            switch (swapTarget) {
+              case 2:
+                newState = newState.copyWith(player1Hand: targetHand, player2Hand: myHand);
+                break;
+              case 3:
+                newState = newState.copyWith(player1Hand: targetHand, player3Hand: myHand);
+                break;
+            }
+            break;
+          case 2:
+            switch (swapTarget) {
+              case 1:
+                newState = newState.copyWith(player2Hand: targetHand, player1Hand: myHand);
+                break;
+              case 3:
+                newState = newState.copyWith(player2Hand: targetHand, player3Hand: myHand);
+                break;
+            }
+            break;
+          case 3:
+            switch (swapTarget) {
+              case 1:
+                newState = newState.copyWith(player3Hand: targetHand, player1Hand: myHand);
+                break;
+              case 2:
+                newState = newState.copyWith(player3Hand: targetHand, player2Hand: myHand);
+                break;
+            }
+            break;
+        }
         newState = _updatePlayerEffects(
           state: newState,
           playerNumber: playerNumber,
@@ -386,18 +449,19 @@ class ItemService {
           final stolenCard = state.deck[randomIndex];
           final newDeck = List<CardData>.from(state.deck)..removeAt(randomIndex);
 
-          if (isPlayer1) {
-            final newHand = List<CardData>.from(state.player1Hand)..add(stolenCard);
-            newState = newState.copyWith(
-              deck: newDeck,
-              player1Hand: newHand,
-            );
-          } else {
-            final newHand = List<CardData>.from(state.player2Hand)..add(stolenCard);
-            newState = newState.copyWith(
-              deck: newDeck,
-              player2Hand: newHand,
-            );
+          switch (playerNumber) {
+            case 1:
+              final newHand = List<CardData>.from(state.player1Hand)..add(stolenCard);
+              newState = newState.copyWith(deck: newDeck, player1Hand: newHand);
+              break;
+            case 2:
+              final newHand = List<CardData>.from(state.player2Hand)..add(stolenCard);
+              newState = newState.copyWith(deck: newDeck, player2Hand: newHand);
+              break;
+            case 3:
+              final newHand = List<CardData>.from(state.player3Hand)..add(stolenCard);
+              newState = newState.copyWith(deck: newDeck, player3Hand: newHand);
+              break;
           }
         }
         newState = _updatePlayerEffects(
@@ -409,10 +473,13 @@ class ItemService {
 
       case ItemType.replaceHand:
         // 손패 전체를 더미패 랜덤 카드로 교체
-        final handCount = isPlayer1
-            ? state.player1Hand.length
-            : state.player2Hand.length;
-        final currentHand = isPlayer1 ? state.player1Hand : state.player2Hand;
+        final currentHand = switch (playerNumber) {
+          1 => state.player1Hand,
+          2 => state.player2Hand,
+          3 => state.player3Hand,
+          _ => state.player2Hand,
+        };
+        final handCount = currentHand.length;
 
         if (state.deck.length >= handCount) {
           final deckCopy = List<CardData>.from(state.deck)..shuffle(_random);
@@ -420,16 +487,16 @@ class ItemService {
           final newDeck = deckCopy.skip(handCount).toList()..addAll(currentHand);
           newDeck.shuffle(_random);
 
-          if (isPlayer1) {
-            newState = newState.copyWith(
-              deck: newDeck,
-              player1Hand: newHand,
-            );
-          } else {
-            newState = newState.copyWith(
-              deck: newDeck,
-              player2Hand: newHand,
-            );
+          switch (playerNumber) {
+            case 1:
+              newState = newState.copyWith(deck: newDeck, player1Hand: newHand);
+              break;
+            case 2:
+              newState = newState.copyWith(deck: newDeck, player2Hand: newHand);
+              break;
+            case 3:
+              newState = newState.copyWith(deck: newDeck, player3Hand: newHand);
+              break;
           }
         }
         newState = _updatePlayerEffects(
@@ -453,21 +520,31 @@ class ItemService {
           final normalFloorCards = newFloorCards.where((c) => !c.isBonus).toList();
 
           // 보너스 카드가 있으면 아이템 사용자의 획득 패에 추가
-          CapturedCards updatedCaptured;
-          if (isPlayer1) {
-            updatedCaptured = state.player1Captured.addCards(bonusCards);
-            newState = newState.copyWith(
-              deck: newDeck,
-              floorCards: normalFloorCards,
-              player1Captured: updatedCaptured,
-            );
-          } else {
-            updatedCaptured = state.player2Captured.addCards(bonusCards);
-            newState = newState.copyWith(
-              deck: newDeck,
-              floorCards: normalFloorCards,
-              player2Captured: updatedCaptured,
-            );
+          switch (playerNumber) {
+            case 1:
+              final updatedCaptured1 = state.player1Captured.addCards(bonusCards);
+              newState = newState.copyWith(
+                deck: newDeck,
+                floorCards: normalFloorCards,
+                player1Captured: updatedCaptured1,
+              );
+              break;
+            case 2:
+              final updatedCaptured2 = state.player2Captured.addCards(bonusCards);
+              newState = newState.copyWith(
+                deck: newDeck,
+                floorCards: normalFloorCards,
+                player2Captured: updatedCaptured2,
+              );
+              break;
+            case 3:
+              final updatedCaptured3 = state.player3Captured.addCards(bonusCards);
+              newState = newState.copyWith(
+                deck: newDeck,
+                floorCards: normalFloorCards,
+                player3Captured: updatedCaptured3,
+              );
+              break;
           }
         }
         newState = _updatePlayerEffects(
@@ -506,11 +583,12 @@ class ItemService {
     required int playerNumber,
     required ItemEffects effects,
   }) {
-    if (playerNumber == 1) {
-      return state.copyWith(player1ItemEffects: effects);
-    } else {
-      return state.copyWith(player2ItemEffects: effects);
-    }
+    return switch (playerNumber) {
+      1 => state.copyWith(player1ItemEffects: effects),
+      2 => state.copyWith(player2ItemEffects: effects),
+      3 => state.copyWith(player3ItemEffects: effects),
+      _ => state.copyWith(player2ItemEffects: effects),
+    };
   }
 
   /// 인벤토리에서 아이템 제거
@@ -525,9 +603,12 @@ class ItemService {
     required int playerNumber,
     required GameState currentState,
   }) async {
-    final effects = playerNumber == 1
-        ? currentState.player1ItemEffects
-        : currentState.player2ItemEffects;
+    final effects = switch (playerNumber) {
+      1 => currentState.player1ItemEffects,
+      2 => currentState.player2ItemEffects,
+      3 => currentState.player3ItemEffects,
+      _ => currentState.player2ItemEffects,
+    };
 
     if (effects == null) return;
 
@@ -536,12 +617,11 @@ class ItemService {
       forceStopOnly: false,
     );
 
-    GameState newState;
-    if (playerNumber == 1) {
-      newState = currentState.copyWith(player1ItemEffects: newEffects);
-    } else {
-      newState = currentState.copyWith(player2ItemEffects: newEffects);
-    }
+    final newState = _updatePlayerEffects(
+      state: currentState,
+      playerNumber: playerNumber,
+      effects: newEffects,
+    );
 
     await _db.child('rooms/$roomId/gameState').set(newState.toJson());
   }
@@ -552,20 +632,22 @@ class ItemService {
     required int playerNumber,
     required GameState currentState,
   }) async {
-    final effects = playerNumber == 1
-        ? currentState.player1ItemEffects
-        : currentState.player2ItemEffects;
+    final effects = switch (playerNumber) {
+      1 => currentState.player1ItemEffects,
+      2 => currentState.player2ItemEffects,
+      3 => currentState.player3ItemEffects,
+      _ => currentState.player2ItemEffects,
+    };
 
     if (effects == null) return currentState;
 
     final newEffects = effects.onTurnEnd();
 
-    GameState newState;
-    if (playerNumber == 1) {
-      newState = currentState.copyWith(player1ItemEffects: newEffects);
-    } else {
-      newState = currentState.copyWith(player2ItemEffects: newEffects);
-    }
+    final newState = _updatePlayerEffects(
+      state: currentState,
+      playerNumber: playerNumber,
+      effects: newEffects,
+    );
 
     await _db.child('rooms/$roomId/gameState').set(newState.toJson());
     return newState;

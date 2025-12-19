@@ -49,28 +49,57 @@ class ScoreResult {
 }
 
 /// 최종 점수 계산 결과 (배수 적용 후)
+/// 
+/// 점수 계산 규칙:
+/// 1. 기본 점수 = 광 + 열끗 + 띠 + 피 + 특수 조합(고도리, 홍단, 청단, 초단)
+/// 2. 고 보너스: 1고 +1점, 2고 +2점, 3고+ ×2^(고-2)배
+/// 3. 흔들기/폭탄: 각 ×2배 (playerMultiplier에 반영)
+/// 4. 멍따(열끗 7장+): ×2배 (점수 배수)
+/// 
+/// 코인 정산 배수 (별도 처리 - CoinService):
+/// - 광박(상대 광 0장): ×2 코인
+/// - 피박: ×2 코인
+/// - 고박: ×2 코인
 class FinalScoreResult {
   final ScoreResult baseScore;
   final int goCount;           // 고 횟수
-  final int goMultiplier;      // 고 배수 (고 1회=2배, 2회=4배, 3회+=1배씩 추가)
-  final bool isPiBak;          // 피박 (상대 피 9장 이하)
-  final bool isGwangBak;       // 광박 (상대 광 0장)
-  final bool isMeongTtarigi;   // 멍따리기 (상대 열끗 0장)
+  final int goAdditive;        // 고 추가 점수 (1고=+1, 2고=+2)
+  final int goMultiplier;      // 고 배수 (3고+=×2, ×4, ×8...)
+  final bool isPiBak;          // 피박 (상대 피 X장 이하) - 코인 정산용
+  final bool isGwangBak;       // 광박 (상대 광 0장) - 코인 정산용
+  final bool isMeongTta;       // 멍따 (내가 열끗 7장 이상) - 점수 배수
   final int playerMultiplier;  // 흔들기/폭탄 배수
   final int finalScore;        // 최종 점수
-  final bool isGobak;          // 고박 (상대가 고 선언 후 내가 7점 도달)
+  final bool isGobak;          // 고박 - 코인 정산용
 
   const FinalScoreResult({
     required this.baseScore,
     this.goCount = 0,
+    this.goAdditive = 0,
     this.goMultiplier = 1,
     this.isPiBak = false,
     this.isGwangBak = false,
-    this.isMeongTtarigi = false,
+    this.isMeongTta = false,
     this.playerMultiplier = 1,
     this.finalScore = 0,
     this.isGobak = false,
   });
+  
+  /// 점수에 적용된 총 배수 (고 배수 × 흔들기/폭탄 × 멍따)
+  int get totalScoreMultiplier {
+    int mult = goMultiplier * playerMultiplier;
+    if (isMeongTta) mult *= 2;
+    return mult;
+  }
+  
+  /// 코인 정산 시 적용되는 배수 (광박, 피박, 고박)
+  int get coinSettlementMultiplier {
+    int mult = 1;
+    if (isGwangBak) mult *= 2;
+    if (isPiBak) mult *= 2;
+    if (isGobak) mult *= 2;
+    return mult;
+  }
 }
 
 /// 맞고 점수 계산기
@@ -80,7 +109,7 @@ class ScoreCalculator {
   static const List<int> blueRibbonMonths = [6, 9, 10];  // 청단 (모란, 국화, 단풍)
   static const List<int> greenRibbonMonths = [4, 5, 7];  // 초단 (등나무, 창포, 싸리)
   static const List<int> birdMonths = [2, 4, 8];         // 고도리 (매화, 등나무, 공산)
-  static const int rainKwangMonth = 11;                   // 비광 (오동)
+  static const int rainKwangMonth = 12;                   // 비광 (12월 비)
 
   /// 점수 계산 (기본)
   static ScoreResult calculateScore(CapturedCards captured) {
@@ -180,52 +209,75 @@ class ScoreCalculator {
   }
 
   /// 최종 점수 계산 (배수 적용)
+  /// 
+  /// 새로운 점수 계산 규칙:
+  /// 1. 기본 점수 계산
+  /// 2. 고 보너스 적용: 1고 +1점, 2고 +2점, 3고+ ×배수
+  /// 3. 흔들기/폭탄 배수 적용
+  /// 4. 멍따(내 열끗 7장+) ×2 적용
+  /// 
+  /// 박 규칙은 점수에 적용되지 않고 코인 정산 시에만 적용:
+  /// - 광박(상대 광 0장): 코인 ×2
+  /// - 피박(상대 피 X장 이하): 코인 ×2
+  /// - 고박: 코인 ×2
   static FinalScoreResult calculateFinalScore({
     required CapturedCards myCaptures,
     required CapturedCards opponentCaptures,
     required int goCount,
     required int playerMultiplier,
-    bool isGobak = false,  // 고박 여부 (상대가 고를 선언한 후 내가 7점 도달)
+    bool isGobak = false,  // 고박 여부
+    GameMode gameMode = GameMode.matgo,  // 게임 모드 (피박 기준 결정)
   }) {
     final baseScore = calculateScore(myCaptures);
 
-    // 고 배수 계산
-    final goMultiplier = _calculateGoMultiplier(goCount);
+    // 고 보너스 계산 (새로운 규칙)
+    final goBonus = calculateGoBonus(goCount);
 
-    // 박 규칙 체크
-    final isPiBak = opponentCaptures.piCount < 10;  // 피 10장 미만
-    final isGwangBak = opponentCaptures.kwang.isEmpty;  // 광 0장
-    final isMeongTtarigi = opponentCaptures.animal.isEmpty;  // 열끗 0장
+    // 박 규칙 체크 (코인 정산용으로만 사용)
+    final isPiBak = opponentCaptures.piCount <= gameMode.piBakThreshold;
+    final isGwangBak = opponentCaptures.kwang.isEmpty;  // 상대 광 0장
+    
+    // 멍따: 내가 열끗 7장 이상 보유 (점수 ×2)
+    final isMeongTta = myCaptures.animal.length >= 7;
 
-    // 배수 계산
-    int totalMultiplier = goMultiplier * playerMultiplier;
-    if (isPiBak) totalMultiplier *= 2;
-    if (isGwangBak) totalMultiplier *= 2;
-    if (isMeongTtarigi) totalMultiplier *= 2;
-    if (isGobak) totalMultiplier *= 2;  // 고박 2배
+    // 점수 배수 계산 (고 배수 × 흔들기/폭탄 × 멍따)
+    // 박 규칙은 점수 배수에 포함하지 않음 (코인 정산에서 처리)
+    int scoreMultiplier = goBonus.multiplier * playerMultiplier;
+    if (isMeongTta) scoreMultiplier *= 2;
 
-    final finalScore = baseScore.baseTotal * totalMultiplier;
+    // 최종 점수 = (기본 점수 + 고 추가점) × 배수
+    final finalScore = (baseScore.baseTotal + goBonus.additive) * scoreMultiplier;
 
     return FinalScoreResult(
       baseScore: baseScore,
       goCount: goCount,
-      goMultiplier: goMultiplier,
+      goAdditive: goBonus.additive,
+      goMultiplier: goBonus.multiplier,
       isPiBak: isPiBak,
       isGwangBak: isGwangBak,
-      isMeongTtarigi: isMeongTtarigi,
+      isMeongTta: isMeongTta,
       playerMultiplier: playerMultiplier,
       finalScore: finalScore,
       isGobak: isGobak,
     );
   }
 
-  /// 고 배수 계산
-  static int _calculateGoMultiplier(int goCount) {
-    if (goCount == 0) return 1;
-    if (goCount == 1) return 2;      // 원고: 2배
-    if (goCount == 2) return 4;      // 이고: 4배
-    return 4 + (goCount - 2);        // 삼고 이상: 4배 + 1배씩 추가
+  /// 고 점수 계산 (새로운 규칙)
+  /// - 1고: 기본점수 + 1점
+  /// - 2고: 기본점수 + 2점
+  /// - 3고 이상: 기본점수 × 2^(고 횟수 - 2)
+  ///   3고=x2, 4고=x4, 5고=x8, 6고=x16, 7고=x32, 8고=x64, 9고=x128, 10고=x256
+  static ({int additive, int multiplier}) calculateGoBonus(int goCount) {
+    if (goCount == 0) return (additive: 0, multiplier: 1);
+    if (goCount == 1) return (additive: 1, multiplier: 1);  // +1점
+    if (goCount == 2) return (additive: 2, multiplier: 1);  // +2점
+    // 3고 이상: 2^(goCount-2) 배
+    // 3고=2^1=2, 4고=2^2=4, 5고=2^3=8, ...
+    final multiplier = 1 << (goCount - 2);  // 비트 시프트로 2의 거듭제곱 계산
+    return (additive: 0, multiplier: multiplier);
   }
+
+  
 
   /// 광 점수 계산
   static int _calculateKwangScore(List<CardData> kwangCards) {
@@ -235,7 +287,7 @@ class ScoreCalculator {
     if (count >= 5) return 15;      // 오광
     if (count == 4) return 4;       // 사광
     if (count == 3) {
-      if (hasRainKwang) return 2;   // 비광 포함 삼광
+      if (hasRainKwang) return 2;   // 비광 포함 삼광 (비삼광)
       return 3;                      // 삼광
     }
     return 0;
@@ -249,7 +301,7 @@ class ScoreCalculator {
     if (count >= 5) return '오광 (광 5장)';
     if (count == 4) return '사광 (광 4장)';
     if (count == 3) {
-      if (hasRainKwang) return '비광 삼광 (비광 포함 3장)';
+      if (hasRainKwang) return '비삼광 (비광 포함 3장)';
       return '삼광 (광 3장)';
     }
     return '';

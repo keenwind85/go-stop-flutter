@@ -26,12 +26,13 @@ class PlayerZone extends StatelessWidget {
   final VoidCallback? onGoPressed;
   final VoidCallback? onStopPressed;
   final bool showGoStopButtons;
-  final bool isShaking;   // 흔들기 사용 여부
-  final bool hasBomb;     // 폭탄 사용 여부
+  final bool isShaking; // 흔들기 사용 여부
+  final bool hasBomb; // 폭탄 사용 여부
+  final bool isMeongTta; // 멍따 상태 (열끗 7장 이상)
   final int? coinBalance; // 코인 잔액
 
   /// 턴 타이머 관련
-  final int? remainingSeconds;  // 남은 시간 (초)
+  final int? remainingSeconds; // 남은 시간 (초)
 
   /// 카드 위치 추적을 위한 GlobalKey 콜백
   final GlobalKey Function(String cardId)? getCardKey;
@@ -41,11 +42,11 @@ class PlayerZone extends StatelessWidget {
 
   /// 디버그 모드 관련
   final bool debugModeActive;
-  final void Function(CardData)? onCardLongPress;  // 디버그: 손패 카드 변경
-  final VoidCallback? onDebugModeActivate;         // 디버그: 모드 발동
+  final void Function(CardData)? onCardLongPress; // 디버그: 손패 카드 변경
+  final VoidCallback? onDebugModeActivate; // 디버그: 모드 발동
 
   /// 아바타 관련
-  final bool isHost;
+  final int playerNumber; // 플레이어 번호 (1=Host, 2=Guest, 3=Guest2)
   final AvatarState avatarState;
 
   const PlayerZone({
@@ -63,6 +64,7 @@ class PlayerZone extends StatelessWidget {
     this.showGoStopButtons = false,
     this.isShaking = false,
     this.hasBomb = false,
+    this.isMeongTta = false,
     this.coinBalance,
     this.remainingSeconds,
     this.getCardKey,
@@ -70,7 +72,7 @@ class PlayerZone extends StatelessWidget {
     this.debugModeActive = false,
     this.onCardLongPress,
     this.onDebugModeActivate,
-    this.isHost = true,
+    this.playerNumber = 1, // 기본값: 호스트
     this.avatarState = AvatarState.normal,
   });
 
@@ -79,12 +81,7 @@ class PlayerZone extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.woodDark.withValues(alpha: 0.95), // 진한 나무 색상
-        border: Border(
-          top: BorderSide(
-            color: AppColors.woodLight,
-            width: 4,
-          ),
-        ),
+        border: Border(top: BorderSide(color: AppColors.woodLight, width: 4)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.5),
@@ -99,19 +96,13 @@ class PlayerZone extends StatelessWidget {
           Column(
             children: [
               // Layer 1: 획득 패 (실제 카드 이미지)
-              Expanded(
-                flex: 30,
-                child: _buildCapturedSection(),
-              ),
+              Expanded(flex: 30, child: _buildCapturedSection()),
 
               // 점수 및 정보 바
               _buildInfoBar(),
 
               // Layer 2: 손패 (부채꼴)
-              Expanded(
-                flex: 70,
-                child: _buildHandSection(),
-              ),
+              Expanded(flex: 70, child: _buildHandSection()),
             ],
           ),
 
@@ -129,7 +120,8 @@ class PlayerZone extends StatelessWidget {
         // 아바타 고정 크기 (상대방과 동일하게 유지)
         const double avatarSize = 52;
 
-        final hasCards = captured != null &&
+        final hasCards =
+            captured != null &&
             (captured!.kwang.isNotEmpty ||
                 captured!.animal.isNotEmpty ||
                 captured!.ribbon.isNotEmpty ||
@@ -141,7 +133,7 @@ class PlayerZone extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: GameAvatar(
-                isHost: isHost,
+                playerNumber: playerNumber,
                 state: avatarState,
                 size: avatarSize,
               ),
@@ -151,7 +143,10 @@ class PlayerZone extends StatelessWidget {
               child: hasCards
                   ? SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
+                      ),
                       child: Row(
                         children: [
                           // 광 (점수가 나는 패 - 강조)
@@ -222,8 +217,8 @@ class PlayerZone extends StatelessWidget {
     int? showCount,
     bool isHighlighted = false,
   }) {
-    final cardWidth = GameConstants.cardWidth * 0.45;
-    final cardHeight = GameConstants.cardHeight * 0.45;
+    final cardWidth = GameConstants.cardWidth * 0.5;
+    final cardHeight = GameConstants.cardHeight * 0.5;
     const overlap = 14.0;
 
     return Container(
@@ -241,7 +236,10 @@ class PlayerZone extends StatelessWidget {
               borderRadius: BorderRadius.circular(4),
               border: isHighlighted
                   ? Border.all(color: labelColor, width: 1)
-                  : Border.all(color: labelColor.withValues(alpha: 0.5), width: 0.5),
+                  : Border.all(
+                      color: labelColor.withValues(alpha: 0.5),
+                      width: 0.5,
+                    ),
             ),
             child: Text(
               '$label ${showCount ?? cards.length}',
@@ -336,7 +334,10 @@ class PlayerZone extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.woodLight, // 밝은 나무 색상 (명패 느낌)
         border: Border.symmetric(
-          horizontal: BorderSide(color: Colors.black.withValues(alpha: 0.3), width: 1),
+          horizontal: BorderSide(
+            color: Colors.black.withValues(alpha: 0.3),
+            width: 1,
+          ),
         ),
         boxShadow: [
           BoxShadow(
@@ -380,8 +381,10 @@ class PlayerZone extends StatelessWidget {
               if (goCount > 0) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.goRed.withValues(alpha: 0.8),
                     borderRadius: BorderRadius.circular(4),
@@ -400,8 +403,10 @@ class PlayerZone extends StatelessWidget {
               if (isShaking) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.amber.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(4),
@@ -427,8 +432,10 @@ class PlayerZone extends StatelessWidget {
               if (hasBomb) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.deepOrange.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(4),
@@ -450,6 +457,35 @@ class PlayerZone extends StatelessWidget {
                   ),
                 ),
               ],
+              // 멍따 태그 (열끗 7장 이상)
+              if (isMeongTta) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade700.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withValues(alpha: 0.4),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: const Text(
+                    '멍따',
+                    style: TextStyle(
+                      color: Colors.yellow,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
 
@@ -462,14 +498,14 @@ class PlayerZone extends StatelessWidget {
                 // 점수
                 Container(
                   alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6), // 디지털 디스플레이 느낌
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: AppColors.woodDark,
-                      width: 2,
-                    ),
+                    border: Border.all(color: AppColors.woodDark, width: 2),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.white.withValues(alpha: 0.1),
@@ -494,7 +530,10 @@ class PlayerZone extends StatelessWidget {
                   const SizedBox(width: 8),
                   Container(
                     alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(8),
@@ -509,7 +548,10 @@ class PlayerZone extends StatelessWidget {
                           height: 20,
                           fit: BoxFit.contain,
                           errorBuilder: (context, error, stackTrace) {
-                            return const Text('🪙', style: TextStyle(fontSize: 14));
+                            return const Text(
+                              '🪙',
+                              style: TextStyle(fontSize: 14),
+                            );
                           },
                         ),
                         const SizedBox(width: 4),
@@ -547,8 +589,7 @@ class PlayerZone extends StatelessWidget {
             ),
           ),
           // 타이머 표시 (손패 없어도 표시)
-          if (isMyTurn && remainingSeconds != null)
-            _buildTimerDisplay(),
+          if (isMyTurn && remainingSeconds != null) _buildTimerDisplay(),
         ],
       );
     }
@@ -568,8 +609,7 @@ class PlayerZone extends StatelessWidget {
               onDebugModeActivate: onDebugModeActivate,
             ),
             // 타이머 표시 (우하단)
-            if (isMyTurn && remainingSeconds != null)
-              _buildTimerDisplay(),
+            if (isMyTurn && remainingSeconds != null) _buildTimerDisplay(),
           ],
         );
       },
@@ -579,7 +619,9 @@ class PlayerZone extends StatelessWidget {
   /// 턴 타이머 표시 위젯 (우하단에 위치)
   Widget _buildTimerDisplay() {
     final isUrgent = remainingSeconds != null && remainingSeconds! <= 10;
-    final displayText = remainingSeconds != null ? '$remainingSeconds초 남았습니다...' : '';
+    final displayText = remainingSeconds != null
+        ? '$remainingSeconds초 남았습니다...'
+        : '';
 
     return Positioned(
       right: 12,
@@ -736,20 +778,17 @@ class _FanHandLayoutState extends State<_FanHandLayout> {
   void _onLongPressStart(CardData card) {
     _longPressCard = card;
     _longPressTimer?.cancel();
-    _longPressTimer = Timer(
-      Duration(seconds: _debugModeLongPressDuration),
-      () {
-        if (_longPressCard != null) {
-          if (widget.debugModeActive) {
-            // 디버그 모드 활성화 상태: 카드 변경 다이얼로그 열기
-            widget.onCardLongPress?.call(_longPressCard!);
-          } else {
-            // 디버그 모드 비활성화 상태: 디버그 모드 발동
-            widget.onDebugModeActivate?.call();
-          }
+    _longPressTimer = Timer(Duration(seconds: _debugModeLongPressDuration), () {
+      if (_longPressCard != null) {
+        if (widget.debugModeActive) {
+          // 디버그 모드 활성화 상태: 카드 변경 다이얼로그 열기
+          widget.onCardLongPress?.call(_longPressCard!);
+        } else {
+          // 디버그 모드 비활성화 상태: 디버그 모드 발동
+          widget.onDebugModeActivate?.call();
         }
-      },
-    );
+      }
+    });
   }
 
   void _onLongPressEnd() {
@@ -768,8 +807,9 @@ class _FanHandLayoutState extends State<_FanHandLayout> {
     final totalAngleRange = maxAngle * 2;
 
     // 카드 수에 따른 각도 간격
-    final angleStep =
-        widget.cards.length > 1 ? totalAngleRange / (widget.cards.length - 1) : 0.0;
+    final angleStep = widget.cards.length > 1
+        ? totalAngleRange / (widget.cards.length - 1)
+        : 0.0;
 
     // 중심점
     final centerX = widget.constraints.maxWidth / 2;

@@ -76,6 +76,12 @@ class _CoinStorageDialogState extends ConsumerState<CoinStorageDialog>
       return;
     }
 
+    // 최대 보관 가능 금액 체크 (최소 10코인은 보유해야 함)
+    if (amount > _maxDepositable) {
+      setState(() => _errorMessage = '최대 $_maxDepositable코인까지 보관 가능합니다.\n(최소 ${CoinService.minCoinAfterDeposit}코인은 보유해야 합니다)');
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _errorMessage = null;

@@ -475,23 +475,12 @@ class _GwangkkiModeAlertState extends State<GwangkkiModeAlert>
                       ],
                     ),
                     const SizedBox(height: 16),
-                    // 발동자 이름
+                    // 발동 메시지
                     Text(
-                      widget.isMyActivation
-                          ? '${widget.activatorName}님이'
-                          : '상대방 ${widget.activatorName}님이',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    // 메시지
-                    Text(
-                      '光끼 모드를 발동했습니다!',
+                      '${widget.activatorName}님이 광끼 모드를 발동하였습니다',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 24,
+                        fontSize: 20,
                         fontWeight: FontWeight.bold,
                         shadows: [
                           Shadow(
@@ -500,8 +489,9 @@ class _GwangkkiModeAlertState extends State<GwangkkiModeAlert>
                           ),
                         ],
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -511,13 +501,14 @@ class _GwangkkiModeAlertState extends State<GwangkkiModeAlert>
                         color: Colors.black.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text(
-                        '승자가 모든 코인을 독식합니다!',
-                        style: TextStyle(
+                      child: Text(
+                        '${widget.activatorName}님이 승리 시\n플레이어의 모든 코인을 독식합니다!',
+                        style: const TextStyle(
                           color: Colors.yellow,
-                          fontSize: 18,
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
+                        textAlign: TextAlign.center,
                       ),
                     ),
                   ],
@@ -538,6 +529,169 @@ class _GwangkkiModeAlertState extends State<GwangkkiModeAlert>
           Icons.warning_amber_rounded,
           size: 36,
           color: _sirenAnimation.value > 0.5 ? Colors.yellow : Colors.red,
+        );
+      },
+    );
+  }
+}
+
+/// 광끼 게이지 분노 애니메이션 (게임 중 축적 시 표시)
+class GwangkkiAngerAnimation extends StatefulWidget {
+  final int points; // 축적된 점수
+  final VoidCallback? onComplete;
+
+  const GwangkkiAngerAnimation({
+    super.key,
+    required this.points,
+    this.onComplete,
+  });
+
+  @override
+  State<GwangkkiAngerAnimation> createState() => _GwangkkiAngerAnimationState();
+}
+
+class _GwangkkiAngerAnimationState extends State<GwangkkiAngerAnimation>
+    with TickerProviderStateMixin {
+  late AnimationController _slideController;
+  late AnimationController _shakeController;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _shakeAnimation;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // 슬라이드 + 페이드 애니메이션 (아래서 위로 올라갔다가 사라짐)
+    _slideController = AnimationController(
+      duration: const Duration(milliseconds: 2500),
+      vsync: this,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.5),
+      end: const Offset(0, -1.0),
+    ).animate(
+      CurvedAnimation(
+        parent: _slideController,
+        curve: const Interval(0.0, 0.8, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _slideController,
+        curve: const Interval(0.0, 0.2, curve: Curves.easeIn),
+      ),
+    );
+
+    // 흔들림 애니메이션
+    _shakeController = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+
+    _shakeAnimation = Tween<double>(begin: -3.0, end: 3.0).animate(
+      CurvedAnimation(parent: _shakeController, curve: Curves.easeInOut),
+    );
+
+    // 애니메이션 시작
+    _startAnimation();
+  }
+
+  Future<void> _startAnimation() async {
+    // 흔들림 효과 (5회 반복)
+    for (int i = 0; i < 5; i++) {
+      if (!mounted) return;
+      await _shakeController.forward();
+      await _shakeController.reverse();
+    }
+
+    // 슬라이드 시작
+    if (mounted) {
+      _slideController.forward();
+    }
+
+    // 애니메이션 완료 대기 후 콜백
+    await Future.delayed(const Duration(milliseconds: 2500));
+    if (mounted) {
+      widget.onComplete?.call();
+    }
+  }
+
+  @override
+  void dispose() {
+    _slideController.dispose();
+    _shakeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_slideAnimation, _shakeAnimation, _fadeAnimation]),
+      builder: (context, child) {
+        // 페이드 아웃 (마지막 20%에서 사라짐)
+        double opacity = _fadeAnimation.value;
+        if (_slideController.value > 0.7) {
+          opacity = 1.0 - ((_slideController.value - 0.7) / 0.3);
+        }
+
+        return SlideTransition(
+          position: _slideAnimation,
+          child: Transform.translate(
+            offset: Offset(_shakeAnimation.value, 0),
+            child: Opacity(
+              opacity: opacity.clamp(0.0, 1.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.red.shade800.withValues(alpha: 0.95),
+                      Colors.orange.shade700.withValues(alpha: 0.95),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.yellow.withValues(alpha: 0.7),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.red.withValues(alpha: 0.6),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      '😡',
+                      style: TextStyle(fontSize: 18),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '아오! 화가난다! +${widget.points}점',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black,
+                            blurRadius: 2,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         );
       },
     );

@@ -104,6 +104,8 @@ class _SpecialEventOverlayState extends State<SpecialEventOverlay>
         return '총통!';
       case SpecialEvent.bonusCardUsed:
         return '보너스패 사용!';
+      case SpecialEvent.meongTta:
+        return '멍따!';
       case SpecialEvent.none:
         return '';
     }
@@ -131,6 +133,8 @@ class _SpecialEventOverlayState extends State<SpecialEventOverlay>
         return '같은 월 4장!';
       case SpecialEvent.bonusCardUsed:
         return '쌍피 효과로 점수 획득!';
+      case SpecialEvent.meongTta:
+        return '열끗 7장 이상! 점수 2배';
       case SpecialEvent.none:
         return '';
     }
@@ -158,6 +162,8 @@ class _SpecialEventOverlayState extends State<SpecialEventOverlay>
         return AppColors.accent;
       case SpecialEvent.bonusCardUsed:
         return Colors.teal;
+      case SpecialEvent.meongTta:
+        return Colors.red;
       case SpecialEvent.none:
         return Colors.grey;
     }
