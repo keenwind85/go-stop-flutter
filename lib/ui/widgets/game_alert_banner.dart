@@ -139,6 +139,10 @@ class _GameAlertBannerState extends State<GameAlertBanner>
   Timer? _gameStartTimer;
   Timer? _oneTimeTimer;
 
+  // 이전 얼럿 개수 추적 (턴 변경과 무관하게 타이머 유지)
+  int _lastKnownAlertCount = 0;
+  bool _isRollingActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -151,7 +155,8 @@ class _GameAlertBannerState extends State<GameAlertBanner>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    _startRollingTimer();
+    _lastKnownAlertCount = widget.persistentAlerts.length;
+    _startRollingTimerIfNeeded();
     _startGameStartTimer();
     _startOneTimeTimer();
   }
@@ -160,9 +165,32 @@ class _GameAlertBannerState extends State<GameAlertBanner>
   void didUpdateWidget(GameAlertBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // 지속 얼럿 목록 변경 시 타이머 재시작
-    if (widget.persistentAlerts.length != oldWidget.persistentAlerts.length) {
-      _startRollingTimer();
+    final currentCount = widget.persistentAlerts.length;
+
+    // 얼럿 개수가 실제로 변경된 경우에만 처리
+    if (currentCount != _lastKnownAlertCount) {
+      final wasRolling = _lastKnownAlertCount > 1;
+      final needsRolling = currentCount > 1;
+
+      // 롤링이 필요없던 상태에서 필요한 상태로 변경된 경우에만 타이머 시작
+      if (!wasRolling && needsRolling) {
+        _startRollingTimerIfNeeded();
+      }
+      // 롤링이 필요없어진 경우 타이머 정리
+      else if (wasRolling && !needsRolling) {
+        _rollingTimer?.cancel();
+        _rollingTimer = null;
+        _isRollingActive = false;
+        _currentPersistentIndex = 0;
+      }
+      // 롤링 중인데 개수만 변경된 경우 - 인덱스만 조정 (타이머 유지)
+      else if (needsRolling && _isRollingActive) {
+        if (_currentPersistentIndex >= currentCount) {
+          _currentPersistentIndex = currentCount - 1;
+        }
+      }
+
+      _lastKnownAlertCount = currentCount;
     }
 
     // 게임 시작 얼럿 변경 시 타이머 재시작
@@ -176,17 +204,22 @@ class _GameAlertBannerState extends State<GameAlertBanner>
     }
   }
 
-  void _startRollingTimer() {
-    _rollingTimer?.cancel();
-    if (widget.persistentAlerts.length > 1) {
+  /// 롤링 타이머 시작 (필요한 경우에만)
+  void _startRollingTimerIfNeeded() {
+    if (widget.persistentAlerts.length > 1 && !_isRollingActive) {
+      _rollingTimer?.cancel();
+      _isRollingActive = true;
       _rollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-        if (mounted) {
+        if (mounted && widget.persistentAlerts.length > 1) {
           setState(() {
             _currentPersistentIndex = (_currentPersistentIndex + 1) % widget.persistentAlerts.length;
           });
         }
       });
-    } else {
+    } else if (widget.persistentAlerts.length <= 1) {
+      _rollingTimer?.cancel();
+      _rollingTimer = null;
+      _isRollingActive = false;
       _currentPersistentIndex = 0;
     }
   }

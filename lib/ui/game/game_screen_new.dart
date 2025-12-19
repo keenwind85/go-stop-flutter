@@ -189,6 +189,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
   List<GameAlertMessage> _oneTimeAlertQueue = [];
   GameAlertMessage? _currentOneTimeAlert;
   Set<String> _shownOneTimeAlertKeys = {};  // 이미 표시된 1회성 얼럿
+  final GlobalKey<State<GameAlertBanner>> _alertBannerKey = GlobalKey();  // 얼럿 배너 상태 유지용
   
   // 이전 상태 추적 (얼럿 트리거용)
   int? _prevPlayer1GoCount;
@@ -4946,23 +4947,17 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                     ),
                   ),
 
-                // 흔들기/폭탄 액션 버튼
+                // 흔들기/폭탄 액션 버튼 (3인 고스톱 모드 지원)
                 if (gameState != null && isMyTurn)
                   Positioned(
                     left: 4,
                     bottom: MediaQuery.of(context).size.height * 0.25,
                     child: ActionButtons(
-                      myHand: widget.isHost
-                          ? gameState.player1Hand
-                          : gameState.player2Hand,
+                      myHand: _getMyHand(gameState),
                       floorCards: gameState.floorCards,
                       isMyTurn: isMyTurn,
-                      alreadyUsedShake: widget.isHost
-                          ? gameState.scores.player1Shaking
-                          : gameState.scores.player2Shaking,
-                      alreadyUsedBomb: widget.isHost
-                          ? gameState.scores.player1Bomb
-                          : gameState.scores.player2Bomb,
+                      alreadyUsedShake: _getMyShaking(gameState),
+                      alreadyUsedBomb: _getMyBomb(gameState),
                       onShake: _onShake,
                       onBomb: _onBomb,
                     ),
@@ -5105,6 +5100,7 @@ class _GameScreenNewState extends ConsumerState<GameScreenNew>
                     left: 4,
                     right: 68,
                     child: GameAlertBanner(
+                      key: _alertBannerKey,
                       gameStartAlert: _gameStartAlert,
                       persistentAlerts: _persistentAlerts,
                       currentOneTimeAlert: _currentOneTimeAlert,
